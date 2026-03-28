@@ -1,0 +1,41 @@
+'use strict';
+
+const TOKENS = Object.freeze({
+  EnvConfig: 'EnvConfig',
+  DiscordConfig: 'DiscordConfig',
+  DbConfig: 'DbConfig',
+  RedisConfig: 'RedisConfig',
+  Logger: 'Logger',
+  ErrorMapper: 'ErrorMapper',
+  LifecycleBootstrap: 'LifecycleBootstrap',
+  DiscordClient: 'DiscordClient',
+  EventRouter: 'EventRouter',
+  InteractionRouter: 'InteractionRouter',
+  CacheClient: 'CacheClient',
+  PubClient: 'PubClient',
+  SubClient: 'SubClient',
+  RateLimitClient: 'RateLimitClient',
+  QueueClient: 'QueueClient',
+  CircuitBreakerRedis: 'CircuitBreakerRedis',
+  CircuitBreakerDb: 'CircuitBreakerDb',
+  DbPool: 'DbPool',
+  TransactionManager: 'TransactionManager',
+  L1Cache: 'L1Cache',
+  CacheService: 'CacheService',
+  QueueService: 'QueueService',
+  RateLimitService: 'RateLimitService',
+  PubSubService: 'PubSubService',
+  PingService: 'PingService',
+  ProfileService: 'ProfileService',
+  ModerationService: 'ModerationService',
+  PingController: 'PingController',
+  ProfileController: 'ProfileController',
+  ModerationController: 'ModerationController',
+  InteractionOrchestrator: 'InteractionOrchestrator',
+  UserRepository: 'UserRepository',
+  GuildRepository: 'GuildRepository',
+  WarningRepository: 'WarningRepository',
+  UserCacheRepository: 'UserCacheRepository'
+});
+
+module.exports = { TOKENS };
