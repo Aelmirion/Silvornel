@@ -6,7 +6,9 @@ class PubClient {
     this.circuitBreaker = circuitBreaker;
   }
 
-  async publish(_channel, _message) {}
+  async publish(channel, message) {
+    return this.circuitBreaker.execute(async () => this.redisClient.publish(channel, message));
+  }
 }
 
 module.exports = { PubClient };

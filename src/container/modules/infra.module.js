@@ -19,8 +19,11 @@ function registerInfraModule(container) {
   container.bind(TOKENS.L1Cache, () => new L1CacheRepository());
   container.bind(TOKENS.UserCacheRepository, (c) => new UserCacheRepository({ cacheService: c.resolve(TOKENS.CacheService) }));
 
-  container.bind('Publisher', (c) => new Publisher({ pubClient: c.resolve(TOKENS.PubClient) }));
-  container.bind('CacheInvalidationSubscriber', (c) => new CacheInvalidationSubscriber({ subClient: c.resolve(TOKENS.SubClient), l1Cache: c.resolve(TOKENS.L1Cache) }));
+  container.bind(TOKENS.Publisher, (c) => new Publisher({ pubClient: c.resolve(TOKENS.PubClient) }));
+  container.bind(TOKENS.CacheInvalidationSubscriber, (c) => new CacheInvalidationSubscriber({
+    subClient: c.resolve(TOKENS.SubClient),
+    l1Cache: c.resolve(TOKENS.L1Cache)
+  }));
 }
 
 module.exports = { registerInfraModule };

@@ -6,7 +6,9 @@ class SubClient {
     this.circuitBreaker = circuitBreaker;
   }
 
-  async subscribe(_channel, _handler) {}
+  async subscribe(channel, handler) {
+    return this.circuitBreaker.execute(async () => this.redisClient.subscribe(channel, handler));
+  }
 }
 
 module.exports = { SubClient };

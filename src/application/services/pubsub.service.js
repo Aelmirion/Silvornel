@@ -6,8 +6,16 @@ class PubSubService {
     this.subscriber = subscriber;
   }
 
-  async publish(_channel, _payload) {}
-  async subscribe(_channel, _handler) {}
+  async publish(channel, payload) {
+    return this.publisher.publish(channel, payload);
+  }
+
+  async subscribe(channel, handler) {
+    return this.subscriber.subscribe(channel, async (message) => {
+      const payload = typeof message === 'string' ? JSON.parse(message) : message;
+      return handler(payload);
+    });
+  }
 }
 
 module.exports = { PubSubService };

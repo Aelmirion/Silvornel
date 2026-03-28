@@ -43,6 +43,8 @@ const TOKENS = Object.freeze({
   GuildRepository: 'GuildRepository',
   WarningRepository: 'WarningRepository',
   UserCacheRepository: 'UserCacheRepository',
+  Publisher: 'Publisher',
+  CacheInvalidationSubscriber: 'CacheInvalidationSubscriber',
   MiddlewarePipeline: 'MiddlewarePipeline',
   ControllerRegistry: 'ControllerRegistry'
 });

@@ -6,9 +6,17 @@ class CacheClient {
     this.circuitBreaker = circuitBreaker;
   }
 
-  async get(_key) { return null; }
-  async set(_key, _value, _ttlSeconds) {}
-  async del(_key) {}
+  async get(key) {
+    return this.circuitBreaker.execute(async () => this.redisClient.get(key));
+  }
+
+  async set(key, value, ttlSeconds) {
+    return this.circuitBreaker.execute(async () => this.redisClient.set(key, value, { EX: ttlSeconds }));
+  }
+
+  async del(key) {
+    return this.circuitBreaker.execute(async () => this.redisClient.del(key));
+  }
 }
 
 module.exports = { CacheClient };

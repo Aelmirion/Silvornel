@@ -5,7 +5,9 @@ class Publisher {
     this.pubClient = pubClient;
   }
 
-  async publish(_channel, _payload) {}
+  async publish(channel, payload) {
+    return this.pubClient.publish(channel, JSON.stringify(payload));
+  }
 }
 
 module.exports = { Publisher };
