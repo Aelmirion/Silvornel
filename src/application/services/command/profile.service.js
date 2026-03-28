@@ -49,13 +49,16 @@ class ProfileService {
   async updateProfile(profileDto) {
     const current = await this.ensureProfileExists(profileDto.userId);
     const updated = applyProfileUpdate(current, profileDto);
-    const saved = await this.userRepository.update(updated);
 
+    // required order: DB write -> delete L2 -> delete local L1 -> publish invalidation event
+    const saved = await this.userRepository.update(updated);
     await this.userCacheRepository.deleteProfile(profileDto.userId);
+
     await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, {
       eventId: randomUUID(),
       schemaVersion: EVENT_SCHEMA.current,
-      userId: profileDto.userId
+      userId: profileDto.userId,
+      originShard: process.env.SHARD_ID || '0'
     });
 
     return {
@@ -63,7 +66,7 @@ class ProfileService {
       data: {
         content: `✅ Profile updated\nBio: ${saved.bio}`
       },
-      meta: { action: 'set', userId: profileDto.userId }
+      meta: { action: 'set', userId: profileDto.userId, cacheCleared: true }
     };
   }
 

@@ -28,8 +28,9 @@ class CacheService {
   }
 
   async invalidate(key) {
-    this.l1Cache.del(key);
+    // required order: L2 first, then local L1
     await this.cacheClient.del(key);
+    this.l1Cache.del(key);
   }
 }
 
