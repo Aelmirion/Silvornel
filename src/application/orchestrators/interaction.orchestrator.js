@@ -1,14 +1,16 @@
 'use strict';
 
 class InteractionOrchestrator {
-  constructor({ pingController, profileController, moderationController }) {
-    this.pingController = pingController;
-    this.profileController = profileController;
-    this.moderationController = moderationController;
+  constructor({ middlewarePipeline, controllerRegistry }) {
+    this.middlewarePipeline = middlewarePipeline;
+    this.controllerRegistry = controllerRegistry;
   }
 
-  async handle(_interaction) {
-    return null;
+  async handle(interactionContext) {
+    return this.middlewarePipeline.run(interactionContext, async (ctx) => {
+      const controller = this.controllerRegistry.resolve(ctx);
+      return controller.execute(ctx);
+    });
   }
 }
 

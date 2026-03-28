@@ -5,13 +5,24 @@ class L1CacheRepository {
     this.store = new Map();
   }
 
-  get(_key) {
-    return null;
+  get(key) {
+    const record = this.store.get(key);
+    if (!record) return null;
+    if (record.expiresAt <= Date.now()) {
+      this.store.delete(key);
+      return null;
+    }
+    return record.value;
   }
 
-  set(_key, _value, _ttlSeconds) {}
+  set(key, value, ttlSeconds) {
+    const expiresAt = Date.now() + (ttlSeconds * 1000);
+    this.store.set(key, { value, expiresAt });
+  }
 
-  del(_key) {}
+  del(key) {
+    this.store.delete(key);
+  }
 }
 
 module.exports = { L1CacheRepository };

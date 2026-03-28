@@ -17,18 +17,26 @@ const { CircuitBreaker } = require('../../core/utils/circuitBreaker');
 function registerAdapterModule(container) {
   container.bind(TOKENS.CircuitBreakerRedis, () => new CircuitBreaker('redis'));
   container.bind(TOKENS.CircuitBreakerDb, () => new CircuitBreaker('db'));
+
   container.bind(TOKENS.DiscordClient, (c) => createDiscordClient(c.resolve(TOKENS.DiscordConfig)));
   container.bind(TOKENS.EventRouter, (c) => new EventRouter({ lifecycleBootstrap: c.resolve(TOKENS.LifecycleBootstrap) }));
   container.bind(TOKENS.InteractionRouter, (c) => new InteractionRouter({ interactionOrchestrator: c.resolve(TOKENS.InteractionOrchestrator) }));
+
   container.bind(TOKENS.DbPool, (c) => createMariaDbPool(c.resolve(TOKENS.DbConfig)));
   container.bind(TOKENS.TransactionManager, (c) => new TransactionManager({ pool: c.resolve(TOKENS.DbPool) }));
 
-  container.bind('RedisBaseClient', (c) => createRedisClient(c.resolve(TOKENS.RedisConfig)));
-  container.bind(TOKENS.CacheClient, (c) => new CacheClient({ redisClient: c.resolve('RedisBaseClient'), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
-  container.bind(TOKENS.PubClient, (c) => new PubClient({ redisClient: c.resolve('RedisBaseClient'), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
-  container.bind(TOKENS.SubClient, (c) => new SubClient({ redisClient: c.resolve('RedisBaseClient'), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
-  container.bind(TOKENS.RateLimitClient, (c) => new RateLimitClient({ redisClient: c.resolve('RedisBaseClient'), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
-  container.bind(TOKENS.QueueClient, (c) => new QueueClient({ redisClient: c.resolve('RedisBaseClient'), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
+  // Strict Redis client separation by function.
+  container.bind(TOKENS.RedisCacheBaseClient, (c) => createRedisClient(c.resolve(TOKENS.RedisConfig)));
+  container.bind(TOKENS.RedisPubBaseClient, (c) => createRedisClient(c.resolve(TOKENS.RedisConfig)));
+  container.bind(TOKENS.RedisSubBaseClient, (c) => createRedisClient(c.resolve(TOKENS.RedisConfig)));
+  container.bind(TOKENS.RedisQueueBaseClient, (c) => createRedisClient(c.resolve(TOKENS.RedisConfig)));
+  container.bind(TOKENS.RedisRateLimitBaseClient, (c) => createRedisClient(c.resolve(TOKENS.RedisConfig)));
+
+  container.bind(TOKENS.CacheClient, (c) => new CacheClient({ redisClient: c.resolve(TOKENS.RedisCacheBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
+  container.bind(TOKENS.PubClient, (c) => new PubClient({ redisClient: c.resolve(TOKENS.RedisPubBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
+  container.bind(TOKENS.SubClient, (c) => new SubClient({ redisClient: c.resolve(TOKENS.RedisSubBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
+  container.bind(TOKENS.QueueClient, (c) => new QueueClient({ redisClient: c.resolve(TOKENS.RedisQueueBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
+  container.bind(TOKENS.RateLimitClient, (c) => new RateLimitClient({ redisClient: c.resolve(TOKENS.RedisRateLimitBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
 }
 
 module.exports = { registerAdapterModule };

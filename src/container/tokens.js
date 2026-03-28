@@ -16,6 +16,11 @@ const TOKENS = Object.freeze({
   SubClient: 'SubClient',
   RateLimitClient: 'RateLimitClient',
   QueueClient: 'QueueClient',
+  RedisCacheBaseClient: 'RedisCacheBaseClient',
+  RedisPubBaseClient: 'RedisPubBaseClient',
+  RedisSubBaseClient: 'RedisSubBaseClient',
+  RedisQueueBaseClient: 'RedisQueueBaseClient',
+  RedisRateLimitBaseClient: 'RedisRateLimitBaseClient',
   CircuitBreakerRedis: 'CircuitBreakerRedis',
   CircuitBreakerDb: 'CircuitBreakerDb',
   DbPool: 'DbPool',
@@ -35,7 +40,9 @@ const TOKENS = Object.freeze({
   UserRepository: 'UserRepository',
   GuildRepository: 'GuildRepository',
   WarningRepository: 'WarningRepository',
-  UserCacheRepository: 'UserCacheRepository'
+  UserCacheRepository: 'UserCacheRepository',
+  MiddlewarePipeline: 'MiddlewarePipeline',
+  ControllerRegistry: 'ControllerRegistry'
 });
 
 module.exports = { TOKENS };

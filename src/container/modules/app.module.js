@@ -19,9 +19,8 @@ function registerAppModule(container) {
   container.bind(TOKENS.ProfileService, (c) => new ProfileService({ userRepository: c.resolve(TOKENS.UserRepository), userCacheRepository: c.resolve(TOKENS.UserCacheRepository) }));
   container.bind(TOKENS.ModerationService, (c) => new ModerationService({ warningRepository: c.resolve(TOKENS.WarningRepository) }));
   container.bind(TOKENS.InteractionOrchestrator, (c) => new InteractionOrchestrator({
-    pingController: c.resolve(TOKENS.PingController),
-    profileController: c.resolve(TOKENS.ProfileController),
-    moderationController: c.resolve(TOKENS.ModerationController)
+    middlewarePipeline: c.resolve(TOKENS.MiddlewarePipeline),
+    controllerRegistry: c.resolve(TOKENS.ControllerRegistry)
   }));
 }
 
