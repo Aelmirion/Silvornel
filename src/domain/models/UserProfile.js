@@ -1,9 +1,12 @@
 'use strict';
 
 class UserProfile {
-  constructor({ userId, displayName }) {
+  constructor({ userId, bio = '', preferences = {}, createdAt = null, updatedAt = null }) {
     this.userId = userId;
-    this.displayName = displayName;
+    this.bio = bio;
+    this.preferences = preferences;
+    this.createdAt = createdAt;
+    this.updatedAt = updatedAt;
   }
 }
 

@@ -1,7 +1,9 @@
 'use strict';
 
-const { UserProfile } = require('../../../domain/models/UserProfile');
+const { randomUUID } = require('crypto');
 const { REDIS_CHANNELS } = require('../../../config/constants/redis.channels');
+const { EVENT_SCHEMA } = require('../../../config/constants/event.schema');
+const { createDefaultProfile, applyProfileUpdate } = require('../../../domain/rules/profile.rules');
 
 class ProfileService {
   constructor({ userRepository, userCacheRepository, pubSubService }) {
@@ -10,78 +12,67 @@ class ProfileService {
     this.pubSubService = pubSubService;
   }
 
-  resolveAction(options = []) {
-    const actionOption = options.find((option) => option.name === 'action');
-    if (actionOption?.value === 'set') return 'set';
-    const subCommandOption = options.find((option) => Array.isArray(option.options));
-    if (subCommandOption?.name === 'set') return 'set';
-    return 'get';
+  async ensureProfileExists(userId) {
+    const existing = await this.userRepository.findByDiscordId(userId);
+    if (existing) {
+      return existing;
+    }
+
+    const defaultProfile = createDefaultProfile(userId);
+    return this.userRepository.create(defaultProfile);
   }
 
-  resolveDisplayName(options = [], fallback) {
-    const directOption = options.find((option) => option.name === 'display_name' && typeof option.value === 'string');
-    if (directOption) return directOption.value;
-
-    const subCommandOption = options.find((option) => Array.isArray(option.options));
-    const nestedOption = subCommandOption?.options?.find((option) => option.name === 'display_name' && typeof option.value === 'string');
-    if (nestedOption) return nestedOption.value;
-
-    return fallback;
-  }
-
-  async getProfile(userId) {
-    const cachedProfile = await this.userCacheRepository.get(userId);
+  async getProfile(profileDto) {
+    const cachedProfile = await this.userCacheRepository.getProfile(profileDto.userId);
     if (cachedProfile) {
-      return cachedProfile;
-    }
-
-    const storedProfile = await this.userRepository.findByDiscordId(userId);
-    if (!storedProfile) {
-      return null;
-    }
-
-    await this.userCacheRepository.set(storedProfile);
-    return storedProfile;
-  }
-
-  async execute(commandDto) {
-    const action = this.resolveAction(commandDto.options);
-
-    if (action === 'set') {
-      const displayName = this.resolveDisplayName(commandDto.options, `user-${commandDto.userId}`);
-      const profile = new UserProfile({ userId: commandDto.userId, displayName });
-
-      const saved = await this.userRepository.upsert(profile);
-      await this.userCacheRepository.invalidate(commandDto.userId);
-      await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, {
-        key: this.userCacheRepository.createCacheKey(commandDto.userId)
-      });
-
       return {
         kind: 'interaction.response',
         data: {
-          content: `✅ Profile updated: ${saved.displayName}`
+          content: `👤 Profile\nBio: ${cachedProfile.bio}`
         },
-        meta: {
-          action: 'set',
-          userId: commandDto.userId
-        }
+        meta: { action: 'get', source: 'cache', userId: profileDto.userId }
       };
     }
 
-    const profile = await this.getProfile(commandDto.userId);
-    const displayName = profile?.displayName || 'not set';
+    const persistedProfile = await this.ensureProfileExists(profileDto.userId);
+    await this.userCacheRepository.setProfile(profileDto.userId, persistedProfile, 180);
 
     return {
       kind: 'interaction.response',
       data: {
-        content: `👤 Profile: ${displayName}`
+        content: `👤 Profile\nBio: ${persistedProfile.bio}`
       },
-      meta: {
-        action: 'get',
-        userId: commandDto.userId
-      }
+      meta: { action: 'get', source: 'db', userId: profileDto.userId }
     };
+  }
+
+  async updateProfile(profileDto) {
+    const current = await this.ensureProfileExists(profileDto.userId);
+    const updated = applyProfileUpdate(current, profileDto);
+    const saved = await this.userRepository.update(updated);
+
+    await this.userCacheRepository.deleteProfile(profileDto.userId);
+    await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, {
+      eventId: randomUUID(),
+      schemaVersion: EVENT_SCHEMA.current,
+      userId: profileDto.userId
+    });
+
+    return {
+      kind: 'interaction.response',
+      data: {
+        content: `✅ Profile updated\nBio: ${saved.bio}`
+      },
+      meta: { action: 'set', userId: profileDto.userId }
+    };
+  }
+
+  async execute(profileDto) {
+    if (profileDto.action === 'set') {
+      return this.updateProfile(profileDto);
+    }
+
+    return this.getProfile(profileDto);
   }
 }
 

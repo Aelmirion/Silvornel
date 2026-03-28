@@ -1,6 +1,7 @@
 'use strict';
 
 const { REDIS_CHANNELS } = require('../../../config/constants/redis.channels');
+const { CACHE_KEYS } = require('../../../config/constants/cache.keys');
 
 class CacheInvalidationSubscriber {
   constructor({ subClient, l1Cache }) {
@@ -11,8 +12,9 @@ class CacheInvalidationSubscriber {
   async register() {
     await this.subClient.subscribe(REDIS_CHANNELS.cacheInvalidate, async (message) => {
       const payload = typeof message === 'string' ? JSON.parse(message) : message;
-      if (!payload?.key) return;
-      this.l1Cache.del(payload.key);
+      const key = payload?.key || (payload?.userId ? CACHE_KEYS.userProfile(payload.userId) : null);
+      if (!key) return;
+      this.l1Cache.del(key);
     });
   }
 }

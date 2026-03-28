@@ -5,7 +5,11 @@ class UserRepositoryContract {
     throw new Error('Not implemented');
   }
 
-  async upsert(_userProfile) {
+  async create(_userProfile) {
+    throw new Error('Not implemented');
+  }
+
+  async update(_userProfile) {
     throw new Error('Not implemented');
   }
 }

@@ -1,7 +1,7 @@
 'use strict';
 
 const REDIS_CHANNELS = {
-  cacheInvalidate: 'v1:bot:cache:invalidate',
+  cacheInvalidate: 'bot:cache:invalidate',
   broadcast: 'v1:bot:broadcast:message',
   controlReload: 'v1:bot:control:reload'
 };

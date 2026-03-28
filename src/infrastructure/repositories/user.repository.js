@@ -13,6 +13,16 @@ class UserRepository extends UserRepositoryContract {
     this.userSql = userSql;
   }
 
+  mapRowToModel(row) {
+    return new UserProfile({
+      userId: row.user_id,
+      bio: row.bio,
+      preferences: row.preferences_json ? JSON.parse(row.preferences_json) : {},
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    });
+  }
+
   async findByDiscordId(discordId) {
     const connection = await withTimeout(() => this.pool.getConnection(), EXTERNAL_TIMEOUT_MS, 'db.getConnection.findByDiscordId');
     try {
@@ -26,25 +36,35 @@ class UserRepository extends UserRepositoryContract {
         return null;
       }
 
-      const row = rows[0];
-      return new UserProfile({
-        userId: row.user_id,
-        displayName: row.display_name
-      });
+      return this.mapRowToModel(rows[0]);
     } finally {
       connection.release();
     }
   }
 
-  async upsert(userProfile) {
-    const connection = await withTimeout(() => this.pool.getConnection(), EXTERNAL_TIMEOUT_MS, 'db.getConnection.upsert');
+  async create(userProfile) {
+    const connection = await withTimeout(() => this.pool.getConnection(), EXTERNAL_TIMEOUT_MS, 'db.getConnection.create');
     try {
       await withTimeout(
-        () => connection.query(this.userSql.upsert, [userProfile.userId, userProfile.displayName]),
+        () => connection.query(this.userSql.create, [userProfile.userId, userProfile.bio, JSON.stringify(userProfile.preferences)]),
         EXTERNAL_TIMEOUT_MS,
-        'db.query.upsert'
+        'db.query.create'
       );
-      return userProfile;
+      return this.findByDiscordId(userProfile.userId);
+    } finally {
+      connection.release();
+    }
+  }
+
+  async update(userProfile) {
+    const connection = await withTimeout(() => this.pool.getConnection(), EXTERNAL_TIMEOUT_MS, 'db.getConnection.update');
+    try {
+      await withTimeout(
+        () => connection.query(this.userSql.update, [userProfile.bio, JSON.stringify(userProfile.preferences), userProfile.userId]),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.update'
+      );
+      return this.findByDiscordId(userProfile.userId);
     } finally {
       connection.release();
     }

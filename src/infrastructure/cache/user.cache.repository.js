@@ -7,21 +7,26 @@ class UserCacheRepository {
     this.cacheService = cacheService;
   }
 
-  createCacheKey(userId) {
-    return CACHE_KEYS.userProfile(userId);
+  createCacheKey(discordId) {
+    return CACHE_KEYS.userProfile(discordId);
   }
 
-  async get(userId) {
-    return this.cacheService.get(this.createCacheKey(userId));
+  async getProfile(discordId) {
+    return this.cacheService.get(this.createCacheKey(discordId));
   }
 
-  async set(profile, ttlSeconds = 180) {
-    return this.cacheService.set(this.createCacheKey(profile.userId), profile, ttlSeconds);
+  async setProfile(discordId, data, ttlSeconds = 180) {
+    return this.cacheService.set(this.createCacheKey(discordId), data, ttlSeconds);
   }
 
-  async invalidate(userId) {
-    return this.cacheService.invalidate(this.createCacheKey(userId));
+  async deleteProfile(discordId) {
+    return this.cacheService.invalidate(this.createCacheKey(discordId));
   }
+
+  // Backward-compatible aliases
+  async get(discordId) { return this.getProfile(discordId); }
+  async set(profile, ttlSeconds = 180) { return this.setProfile(profile.userId, profile, ttlSeconds); }
+  async invalidate(discordId) { return this.deleteProfile(discordId); }
 }
 
 module.exports = { UserCacheRepository };

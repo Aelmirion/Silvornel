@@ -1,6 +1,7 @@
 'use strict';
 
 const { CommandDto } = require('../../dto/command.dto');
+const { ProfileDto } = require('../../dto/profile.dto');
 
 class ProfileController {
   constructor({ profileService }) {
@@ -15,7 +16,13 @@ class ProfileController {
       options: interactionDto.options
     });
 
-    return this.profileService.execute(commandDto);
+    const profileDto = ProfileDto.fromCommand(commandDto);
+
+    if (profileDto.action === 'set') {
+      return this.profileService.updateProfile(profileDto);
+    }
+
+    return this.profileService.getProfile(profileDto);
   }
 }
 
