@@ -9,7 +9,11 @@ function createMariaDbPool(config) {
     user: config.user,
     password: config.password,
     database: config.database,
-    connectionLimit: config.connectionLimit
+    connectionLimit: config.connectionLimit,
+    acquireTimeout: config.acquireTimeout,
+    connectTimeout: config.connectTimeout,
+    idleTimeout: 60_000,
+    minimumIdle: 1
   });
 }
 

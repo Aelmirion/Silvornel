@@ -6,7 +6,20 @@ class QueueClient {
     this.circuitBreaker = circuitBreaker;
   }
 
-  async enqueue(_queueName, _job) {}
+  async enqueue(queueName, job) {
+    return this.circuitBreaker.execute(
+      async () => this.redisClient.rPush(queueName, JSON.stringify(job)),
+      { label: `redis.queue.enqueue:${queueName}` }
+    );
+  }
+
+  async length(queueName) {
+    return this.circuitBreaker.execute(
+      async () => this.redisClient.lLen(queueName),
+      { label: `redis.queue.length:${queueName}` }
+    );
+  }
+
   async reserve(_queueName) { return null; }
   async ack(_queueName, _jobId) {}
 }

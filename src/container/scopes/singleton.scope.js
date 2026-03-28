@@ -10,6 +10,14 @@ class Container {
     this.bindings.set(token, { factory, singleton });
   }
 
+  has(token) {
+    return this.bindings.has(token);
+  }
+
+  listBindings() {
+    return Array.from(this.bindings.keys());
+  }
+
   resolve(token) {
     const binding = this.bindings.get(token);
     if (!binding) throw new Error(`Missing binding for token: ${token}`);

@@ -7,6 +7,12 @@ class ControllerRegistry {
     this.moderationController = moderationController;
   }
 
+  validateCompleteness() {
+    if (!this.pingController || !this.profileController || !this.moderationController) {
+      throw new Error('Controller registry is incomplete');
+    }
+  }
+
   resolve(context) {
     const commandName = context?.commandName;
     if (commandName === 'ping') return this.pingController;

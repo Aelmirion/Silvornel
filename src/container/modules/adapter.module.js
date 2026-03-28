@@ -17,8 +17,8 @@ const { QueueClient } = require('../../adapters/redis/queue.client');
 const { CircuitBreaker } = require('../../core/utils/circuitBreaker');
 
 function registerAdapterModule(container) {
-  container.bind(TOKENS.CircuitBreakerRedis, () => new CircuitBreaker('redis'));
-  container.bind(TOKENS.CircuitBreakerDb, () => new CircuitBreaker('db'));
+  container.bind(TOKENS.CircuitBreakerRedis, (c) => new CircuitBreaker('redis', { timeoutMs: c.resolve(TOKENS.EnvConfig).runtime.externalCallTimeoutMs }));
+  container.bind(TOKENS.CircuitBreakerDb, (c) => new CircuitBreaker('db', { timeoutMs: c.resolve(TOKENS.EnvConfig).runtime.externalCallTimeoutMs }));
 
   container.bind(TOKENS.DiscordClient, (c) => createDiscordClient(c.resolve(TOKENS.DiscordConfig)));
   container.bind(TOKENS.InteractionMapper, () => new InteractionMapper());

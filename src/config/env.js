@@ -27,13 +27,21 @@ function createEnvConfig(env) {
       user: env.MARIADB_USER || '',
       password: env.MARIADB_PASSWORD || '',
       database: env.MARIADB_DATABASE || '',
-      connectionLimit: parseInteger(env.MARIADB_CONNECTION_LIMIT, 10)
+      connectionLimit: parseInteger(env.MARIADB_CONNECTION_LIMIT, 10),
+      connectTimeoutMs: parseInteger(env.MARIADB_CONNECT_TIMEOUT_MS, 5000),
+      acquireTimeoutMs: parseInteger(env.MARIADB_ACQUIRE_TIMEOUT_MS, 5000)
     },
     redis: {
-      url: env.REDIS_URL || 'redis://127.0.0.1:6379'
+      url: env.REDIS_URL || 'redis://127.0.0.1:6379',
+      maxRetryAttempts: parseInteger(env.REDIS_MAX_RETRY_ATTEMPTS, 10),
+      retryBaseMs: parseInteger(env.REDIS_RETRY_BASE_MS, 100)
     },
     queue: {
-      executionMode: env.QUEUE_EXECUTION_MODE || 'in_shard'
+      executionMode: env.QUEUE_EXECUTION_MODE || 'in_shard',
+      maxLength: parseInteger(env.QUEUE_MAX_LENGTH, 1000)
+    },
+    runtime: {
+      externalCallTimeoutMs: parseInteger(env.EXTERNAL_CALL_TIMEOUT_MS, 2000)
     }
   };
 }
