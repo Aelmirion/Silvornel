@@ -1,0 +1,17 @@
+'use strict';
+
+class UserRepositoryContract {
+  async findByDiscordId(_discordId) {
+    throw new Error('Not implemented');
+  }
+
+  async create(_userProfile) {
+    throw new Error('Not implemented');
+  }
+
+  async update(_userProfile) {
+    throw new Error('Not implemented');
+  }
+}
+
+module.exports = { UserRepositoryContract };
