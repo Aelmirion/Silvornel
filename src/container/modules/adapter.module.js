@@ -4,6 +4,8 @@ const { TOKENS } = require('../tokens');
 const { createDiscordClient } = require('../../adapters/discord/discord.client');
 const { EventRouter } = require('../../adapters/discord/event.router');
 const { InteractionRouter } = require('../../adapters/discord/interaction.router');
+const { InteractionMapper } = require('../../adapters/discord/interaction.mapper');
+const { InteractionResponder } = require('../../adapters/discord/responders/interaction.responder');
 const { createMariaDbPool } = require('../../adapters/db/mariadb.pool');
 const { TransactionManager } = require('../../adapters/db/tx.manager');
 const { createRedisClient } = require('../../adapters/redis/redis.factory');
@@ -19,8 +21,18 @@ function registerAdapterModule(container) {
   container.bind(TOKENS.CircuitBreakerDb, () => new CircuitBreaker('db'));
 
   container.bind(TOKENS.DiscordClient, (c) => createDiscordClient(c.resolve(TOKENS.DiscordConfig)));
-  container.bind(TOKENS.EventRouter, (c) => new EventRouter({ lifecycleBootstrap: c.resolve(TOKENS.LifecycleBootstrap) }));
-  container.bind(TOKENS.InteractionRouter, (c) => new InteractionRouter({ interactionOrchestrator: c.resolve(TOKENS.InteractionOrchestrator) }));
+  container.bind(TOKENS.InteractionMapper, () => new InteractionMapper());
+  container.bind(TOKENS.InteractionResponder, () => new InteractionResponder());
+  container.bind(TOKENS.InteractionRouter, (c) => new InteractionRouter({
+    interactionOrchestrator: c.resolve(TOKENS.InteractionOrchestrator),
+    interactionMapper: c.resolve(TOKENS.InteractionMapper),
+    interactionResponder: c.resolve(TOKENS.InteractionResponder)
+  }));
+  container.bind(TOKENS.EventRouter, (c) => new EventRouter({
+    lifecycleBootstrap: c.resolve(TOKENS.LifecycleBootstrap),
+    interactionRouter: c.resolve(TOKENS.InteractionRouter),
+    logger: c.resolve(TOKENS.Logger)
+  }));
 
   container.bind(TOKENS.DbPool, (c) => createMariaDbPool(c.resolve(TOKENS.DbConfig)));
   container.bind(TOKENS.TransactionManager, (c) => new TransactionManager({ pool: c.resolve(TOKENS.DbPool) }));

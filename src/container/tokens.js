@@ -11,6 +11,8 @@ const TOKENS = Object.freeze({
   DiscordClient: 'DiscordClient',
   EventRouter: 'EventRouter',
   InteractionRouter: 'InteractionRouter',
+  InteractionMapper: 'InteractionMapper',
+  InteractionResponder: 'InteractionResponder',
   CacheClient: 'CacheClient',
   PubClient: 'PubClient',
   SubClient: 'SubClient',

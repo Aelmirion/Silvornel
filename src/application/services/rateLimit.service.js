@@ -5,7 +5,13 @@ class RateLimitService {
     this.rateLimitClient = rateLimitClient;
   }
 
-  async enforce(_ctx) {}
+  async enforce(ctx) {
+    if (!ctx || !ctx.userId || !ctx.commandName) {
+      return;
+    }
+
+    await this.rateLimitClient.consume(`v1:rl:user:${ctx.userId}:cmd:${ctx.commandName}`, 5, 10);
+  }
 }
 
 module.exports = { RateLimitService };

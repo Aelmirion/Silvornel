@@ -1,8 +1,17 @@
 'use strict';
 
 class PingService {
-  async execute(_interactionDto) {
-    return { content: 'pong' };
+  async execute(commandDto) {
+    return {
+      kind: 'interaction.response',
+      data: {
+        content: '🏓 Pong!'
+      },
+      meta: {
+        commandName: commandDto.commandName,
+        userId: commandDto.userId
+      }
+    };
   }
 }
 
