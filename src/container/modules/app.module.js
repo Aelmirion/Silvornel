@@ -21,7 +21,12 @@ function registerAppModule(container) {
     userCacheRepository: c.resolve(TOKENS.UserCacheRepository),
     pubSubService: c.resolve(TOKENS.PubSubService)
   }));
-  container.bind(TOKENS.ModerationService, (c) => new ModerationService({ warningRepository: c.resolve(TOKENS.WarningRepository) }));
+  container.bind(TOKENS.ModerationService, (c) => new ModerationService({
+    warningRepository: c.resolve(TOKENS.WarningRepository),
+    warningCacheRepository: c.resolve(TOKENS.WarningCacheRepository),
+    pubSubService: c.resolve(TOKENS.PubSubService),
+    queueService: c.resolve(TOKENS.QueueService)
+  }));
   container.bind(TOKENS.InteractionOrchestrator, (c) => new InteractionOrchestrator({
     middlewarePipeline: c.resolve(TOKENS.MiddlewarePipeline),
     controllerRegistry: c.resolve(TOKENS.ControllerRegistry)

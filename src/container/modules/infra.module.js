@@ -9,6 +9,7 @@ const { UserRepository } = require('../../infrastructure/repositories/user.repos
 const { WarningRepository } = require('../../infrastructure/repositories/warning.repository');
 const { L1CacheRepository } = require('../../infrastructure/cache/l1.cache.repository');
 const { UserCacheRepository } = require('../../infrastructure/cache/user.cache.repository');
+const { WarningCacheRepository } = require('../../infrastructure/cache/warning.cache.repository');
 const { Publisher } = require('../../infrastructure/pubsub/publisher');
 const { CacheInvalidationSubscriber } = require('../../infrastructure/pubsub/subscribers/cacheInvalidation.subscriber');
 
@@ -18,6 +19,7 @@ function registerInfraModule(container) {
   container.bind(TOKENS.WarningRepository, (c) => new WarningRepository({ pool: c.resolve(TOKENS.DbPool), moderationSql }));
   container.bind(TOKENS.L1Cache, () => new L1CacheRepository());
   container.bind(TOKENS.UserCacheRepository, (c) => new UserCacheRepository({ cacheService: c.resolve(TOKENS.CacheService) }));
+  container.bind(TOKENS.WarningCacheRepository, (c) => new WarningCacheRepository({ cacheService: c.resolve(TOKENS.CacheService) }));
 
   container.bind(TOKENS.Publisher, (c) => new Publisher({ pubClient: c.resolve(TOKENS.PubClient) }));
   container.bind(TOKENS.CacheInvalidationSubscriber, (c) => new CacheInvalidationSubscriber({

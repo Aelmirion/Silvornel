@@ -43,6 +43,7 @@ const TOKENS = Object.freeze({
   GuildRepository: 'GuildRepository',
   WarningRepository: 'WarningRepository',
   UserCacheRepository: 'UserCacheRepository',
+  WarningCacheRepository: 'WarningCacheRepository',
   Publisher: 'Publisher',
   CacheInvalidationSubscriber: 'CacheInvalidationSubscriber',
   MiddlewarePipeline: 'MiddlewarePipeline',
