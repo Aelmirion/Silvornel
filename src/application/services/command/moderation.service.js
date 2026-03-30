@@ -31,31 +31,43 @@ class ModerationService {
     });
   }
 
+  async runStep(stepName, executor) {
+    try {
+      return await executor();
+    } catch (error) {
+      throw new Error(`Moderation flow failed at "${stepName}": ${error.message}`, { cause: error });
+    }
+  }
+
   async warnUser(dto) {
-    const warning = await this.warningRepository.createWarning(new Warning({
+    const warning = await this.runStep('db_write_warning', async () => this.warningRepository.createWarning(new Warning({
       guildId: dto.guildId,
       userId: dto.targetUserId,
       moderatorId: dto.moderatorId,
       reason: dto.reason
-    }));
+    })));
 
-    if (this.warningCacheRepository) {
-      await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
-    }
-    await this.publishWarningsInvalidation(dto);
-    const warnings = await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId);
+    await this.runStep('cache_invalidation', async () => {
+      if (this.warningCacheRepository) {
+        await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
+      }
+    });
+
+    await this.runStep('pubsub_publish', async () => this.publishWarningsInvalidation(dto));
+
+    const warnings = await this.runStep('db_read_warnings', async () => this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId));
     const warningCount = warnings.length;
     const moderationRule = evaluateModerationActionByWarnings(warningCount);
 
     if (moderationRule && this.queueService) {
-      await this.queueService.enqueue(QUEUE_NAMES.moderation, {
+      await this.runStep('queue_enqueue', async () => this.queueService.enqueue(QUEUE_NAMES.moderation, {
         type: 'moderation_action',
         userId: dto.targetUserId,
         guildId: dto.guildId,
         action: moderationRule.action,
         reason: moderationRule.reason,
         traceId: dto.traceId || randomUUID()
-      });
+      }));
     }
 
     return {
@@ -115,12 +127,15 @@ class ModerationService {
   }
 
   async clearWarnings(dto) {
-    const deletedCount = await this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId);
+    const deletedCount = await this.runStep('db_delete_warnings', async () => this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId));
 
-    if (this.warningCacheRepository) {
-      await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
-    }
-    await this.publishWarningsInvalidation(dto);
+    await this.runStep('cache_invalidation', async () => {
+      if (this.warningCacheRepository) {
+        await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
+      }
+    });
+
+    await this.runStep('pubsub_publish', async () => this.publishWarningsInvalidation(dto));
 
     return {
       kind: 'interaction.response',
