@@ -46,6 +46,9 @@ const TOKENS = Object.freeze({
   WarningCacheRepository: 'WarningCacheRepository',
   Publisher: 'Publisher',
   CacheInvalidationSubscriber: 'CacheInvalidationSubscriber',
+  ModerationConsumer: 'ModerationConsumer',
+  RetryConsumer: 'RetryConsumer',
+  DeadLetterWorker: 'DeadLetterWorker',
   MiddlewarePipeline: 'MiddlewarePipeline',
   ControllerRegistry: 'ControllerRegistry'
 });

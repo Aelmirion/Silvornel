@@ -12,6 +12,9 @@ const { UserCacheRepository } = require('../../infrastructure/cache/user.cache.r
 const { WarningCacheRepository } = require('../../infrastructure/cache/warning.cache.repository');
 const { Publisher } = require('../../infrastructure/pubsub/publisher');
 const { CacheInvalidationSubscriber } = require('../../infrastructure/pubsub/subscribers/cacheInvalidation.subscriber');
+const { ModerationConsumer } = require('../../infrastructure/queue/consumers/moderation.consumer');
+const { RetryConsumer } = require('../../infrastructure/queue/consumers/retry.consumer');
+const { DeadLetterWorker } = require('../../workers/deadletter.worker');
 
 function registerInfraModule(container) {
   container.bind(TOKENS.GuildRepository, (c) => new GuildRepository({ pool: c.resolve(TOKENS.DbPool), guildSql }));
@@ -26,6 +29,15 @@ function registerInfraModule(container) {
     subClient: c.resolve(TOKENS.SubClient),
     l1Cache: c.resolve(TOKENS.L1Cache)
   }));
+  container.bind(TOKENS.ModerationConsumer, (c) => new ModerationConsumer({
+    queueClient: c.resolve(TOKENS.QueueClient),
+    envConfig: c.resolve(TOKENS.EnvConfig),
+    logger: c.resolve(TOKENS.Logger)
+  }));
+  container.bind(TOKENS.RetryConsumer, (c) => new RetryConsumer({
+    queueClient: c.resolve(TOKENS.QueueClient)
+  }));
+  container.bind(TOKENS.DeadLetterWorker, () => new DeadLetterWorker());
 }
 
 module.exports = { registerInfraModule };
