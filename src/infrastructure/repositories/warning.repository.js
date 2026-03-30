@@ -38,6 +38,11 @@ class WarningRepository extends WarningRepositoryContract {
   }
 
   async createWarning(warning, tx = null) {
+    const { warning: createdWarning } = await this.createWarningWithCount(warning, tx);
+    return createdWarning;
+  }
+
+  async createWarningWithCount(warning, tx = null) {
     const warningModel = warning instanceof Warning ? warning : new Warning(warning);
 
     return this.withConnection(tx, async (connection) => {
@@ -52,15 +57,32 @@ class WarningRepository extends WarningRepositoryContract {
         'db.query.createWarning'
       );
 
-      return new Warning({
-        id: result.insertId,
-        guildId: warningModel.guildId,
-        userId: warningModel.userId,
-        moderatorId: warningModel.moderatorId,
-        reason: warningModel.reason,
-        createdAt
-      });
-    }, 'createWarning');
+      await withTimeout(
+        () => connection.query(this.moderationSql.incrementWarningCount, [warningModel.guildId, warningModel.userId]),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.incrementWarningCount'
+      );
+
+      const rows = await withTimeout(
+        () => connection.query(this.moderationSql.getWarningCount, [warningModel.guildId, warningModel.userId]),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.getWarningCount'
+      );
+
+      const warningCount = Number(rows?.[0]?.warnings ?? 0);
+
+      return {
+        warning: new Warning({
+          id: result.insertId,
+          guildId: warningModel.guildId,
+          userId: warningModel.userId,
+          moderatorId: warningModel.moderatorId,
+          reason: warningModel.reason,
+          createdAt
+        }),
+        warningCount
+      };
+    }, 'createWarningWithCount');
   }
 
   async getWarningsByUser(guildId, userId, tx = null) {
@@ -85,6 +107,16 @@ class WarningRepository extends WarningRepositoryContract {
 
       return result.affectedRows || 0;
     }, 'deleteWarningsByUser');
+  }
+
+  async resetWarningCount(guildId, userId, tx = null) {
+    return this.withConnection(tx, async (connection) => {
+      await withTimeout(
+        () => connection.query(this.moderationSql.resetWarningCount, [guildId, userId]),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.resetWarningCount'
+      );
+    }, 'resetWarningCount');
   }
 }
 
