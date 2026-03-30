@@ -17,7 +17,7 @@ class ControllerRegistry {
     const commandName = context?.commandName;
     if (commandName === 'ping') return this.pingController;
     if (commandName === 'profile') return this.profileController;
-    if (commandName === 'moderation') return this.moderationController;
+    if (commandName === 'moderation' || commandName === 'warn' || commandName === 'warnings' || commandName === 'clearwarnings') return this.moderationController;
     return this.pingController;
   }
 }
