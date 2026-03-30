@@ -2,14 +2,17 @@
 
 const { randomUUID } = require('crypto');
 const { Warning } = require('../../../domain/models/Warning');
+const { evaluateModerationActionByWarnings } = require('../../../domain/rules/moderation.rules');
 const { REDIS_CHANNELS } = require('../../../config/constants/redis.channels');
 const { EVENT_SCHEMA } = require('../../../config/constants/event.schema');
+const { QUEUE_NAMES } = require('../../../config/constants/queue.names');
 
 class ModerationService {
-  constructor({ warningRepository, warningCacheRepository, pubSubService }) {
+  constructor({ warningRepository, warningCacheRepository, pubSubService, queueService }) {
     this.warningRepository = warningRepository;
     this.warningCacheRepository = warningCacheRepository;
     this.pubSubService = pubSubService;
+    this.queueService = queueService;
     this.warningsTtlSeconds = 180;
   }
 
@@ -40,13 +43,35 @@ class ModerationService {
       await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
     }
     await this.publishWarningsInvalidation(dto);
+    const warnings = await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId);
+    const warningCount = warnings.length;
+    const moderationRule = evaluateModerationActionByWarnings(warningCount);
+
+    if (moderationRule && this.queueService) {
+      await this.queueService.enqueue(QUEUE_NAMES.moderation, {
+        type: 'moderation_action',
+        userId: dto.targetUserId,
+        guildId: dto.guildId,
+        action: moderationRule.action,
+        reason: moderationRule.reason,
+        traceId: dto.traceId || randomUUID()
+      });
+    }
 
     return {
       kind: 'interaction.response',
       data: {
-        content: `⚠️ Warned <@${dto.targetUserId}>.\nReason: ${warning.reason}`
+        content: moderationRule
+          ? `⚠️ Warned <@${dto.targetUserId}>.\nReason: ${warning.reason}\nThreshold action queued: ${moderationRule.action}.`
+          : `⚠️ Warned <@${dto.targetUserId}>.\nReason: ${warning.reason}`
       },
-      meta: { action: 'warn', targetUserId: dto.targetUserId, warningId: warning.id }
+      meta: {
+        action: 'warn',
+        targetUserId: dto.targetUserId,
+        warningId: warning.id,
+        warningCount,
+        moderationAction: moderationRule?.action || null
+      }
     };
   }
 
