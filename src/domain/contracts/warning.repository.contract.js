@@ -1,11 +1,15 @@
 'use strict';
 
 class WarningRepositoryContract {
-  async create(_warning) {
+  async createWarning(_warning) {
     throw new Error('Not implemented');
   }
 
-  async listByUser(_userId) {
+  async getWarningsByUser(_guildId, _userId) {
+    throw new Error('Not implemented');
+  }
+
+  async deleteWarningsByUser(_guildId, _userId) {
     throw new Error('Not implemented');
   }
 }
