@@ -12,10 +12,26 @@ class CacheInvalidationSubscriber {
   async register() {
     await this.subClient.subscribe(REDIS_CHANNELS.cacheInvalidate, async (message) => {
       const payload = typeof message === 'string' ? JSON.parse(message) : message;
-      const key = payload?.key || (payload?.userId ? CACHE_KEYS.userProfile(payload.userId) : null);
+      const key = this.deriveCacheKey(payload);
       if (!key) return;
       this.l1Cache.del(key);
     });
+  }
+
+  deriveCacheKey(payload) {
+    if (payload?.key) {
+      return payload.key;
+    }
+
+    if (payload?.entity === 'warnings' && payload?.guildId && payload?.userId) {
+      return `v1:guild:${payload.guildId}:user:${payload.userId}:warnings`;
+    }
+
+    if (payload?.userId) {
+      return CACHE_KEYS.userProfile(payload.userId);
+    }
+
+    return null;
   }
 }
 

@@ -1,12 +1,31 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
 const { Warning } = require('../../../domain/models/Warning');
+const { REDIS_CHANNELS } = require('../../../config/constants/redis.channels');
+const { EVENT_SCHEMA } = require('../../../config/constants/event.schema');
 
 class ModerationService {
-  constructor({ warningRepository, warningCacheRepository }) {
+  constructor({ warningRepository, warningCacheRepository, pubSubService }) {
     this.warningRepository = warningRepository;
     this.warningCacheRepository = warningCacheRepository;
+    this.pubSubService = pubSubService;
     this.warningsTtlSeconds = 180;
+  }
+
+  async publishWarningsInvalidation(dto) {
+    if (!this.pubSubService) {
+      return;
+    }
+
+    await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, {
+      eventId: randomUUID(),
+      schemaVersion: EVENT_SCHEMA.current,
+      guildId: dto.guildId,
+      userId: dto.targetUserId,
+      entity: 'warnings',
+      originShard: process.env.SHARD_ID || '0'
+    });
   }
 
   async warnUser(dto) {
@@ -20,6 +39,7 @@ class ModerationService {
     if (this.warningCacheRepository) {
       await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
     }
+    await this.publishWarningsInvalidation(dto);
 
     return {
       kind: 'interaction.response',
@@ -75,6 +95,7 @@ class ModerationService {
     if (this.warningCacheRepository) {
       await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
     }
+    await this.publishWarningsInvalidation(dto);
 
     return {
       kind: 'interaction.response',
