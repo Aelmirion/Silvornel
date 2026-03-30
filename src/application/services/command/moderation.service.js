@@ -32,7 +32,7 @@ class ModerationService {
   }
 
   async warnUser(dto) {
-    const warning = await this.warningRepository.createWarning(new Warning({
+    const { warning, warningCount } = await this.warningRepository.createWarningWithCount(new Warning({
       guildId: dto.guildId,
       userId: dto.targetUserId,
       moderatorId: dto.moderatorId,
@@ -43,8 +43,6 @@ class ModerationService {
       await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
     }
     await this.publishWarningsInvalidation(dto);
-    const warnings = await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId);
-    const warningCount = warnings.length;
     const moderationRule = evaluateModerationActionByWarnings(warningCount);
 
     if (moderationRule && this.queueService) {
@@ -116,6 +114,7 @@ class ModerationService {
 
   async clearWarnings(dto) {
     const deletedCount = await this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId);
+    await this.warningRepository.resetWarningCount(dto.guildId, dto.targetUserId);
 
     if (this.warningCacheRepository) {
       await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
