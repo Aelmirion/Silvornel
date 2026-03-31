@@ -34,7 +34,8 @@ function createEnvConfig(env) {
     redis: {
       url: env.REDIS_URL || 'redis://127.0.0.1:6379',
       maxRetryAttempts: parseInteger(env.REDIS_MAX_RETRY_ATTEMPTS, 10),
-      retryBaseMs: parseInteger(env.REDIS_RETRY_BASE_MS, 100)
+      retryBaseMs: parseInteger(env.REDIS_RETRY_BASE_MS, 100),
+      durabilityMode: env.REDIS_DURABILITY_MODE || 'best_effort'
     },
     queue: {
       executionMode: env.QUEUE_EXECUTION_MODE || 'in_shard',
