@@ -8,12 +8,13 @@ const { EVENT_SCHEMA } = require('../../../config/constants/event.schema');
 const { QUEUE_NAMES } = require('../../../config/constants/queue.names');
 
 class ModerationService {
-  constructor({ warningRepository, warningCacheRepository, pubSubService, queueService, logger }) {
+  constructor({ warningRepository, warningCacheRepository, pubSubService, queueService, logger, transactionManager }) {
     this.warningRepository = warningRepository;
     this.warningCacheRepository = warningCacheRepository;
     this.pubSubService = pubSubService;
     this.queueService = queueService;
     this.logger = logger;
+    this.transactionManager = transactionManager;
     this.warningsTtlSeconds = 180;
   }
 
@@ -79,12 +80,12 @@ class ModerationService {
       return this.buildWarningsResponse(dto, await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId), 'idempotent');
     }
 
-    const warning = await this.runStep('db_write_warning', dto, async () => this.warningRepository.createWarning(new Warning({
+    const warning = await this.runStep('db_write_warning', dto, async () => this.transactionManager.runInTransaction((tx) => this.warningRepository.createWarning(new Warning({
       guildId: dto.guildId,
       userId: dto.targetUserId,
       moderatorId: dto.moderatorId,
       reason: dto.reason
-    })));
+    }), tx)));
 
     await this.runStep('cache_invalidation', dto, async () => {
       if (this.warningCacheRepository) {

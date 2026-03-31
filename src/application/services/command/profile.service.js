@@ -6,20 +6,28 @@ const { EVENT_SCHEMA } = require('../../../config/constants/event.schema');
 const { createDefaultProfile, applyProfileUpdate } = require('../../../domain/rules/profile.rules');
 
 class ProfileService {
-  constructor({ userRepository, userCacheRepository, pubSubService }) {
+  constructor({ userRepository, userCacheRepository, pubSubService, transactionManager }) {
     this.userRepository = userRepository;
     this.userCacheRepository = userCacheRepository;
     this.pubSubService = pubSubService;
+    this.transactionManager = transactionManager;
   }
 
-  async ensureProfileExists(userId) {
-    const existing = await this.userRepository.findByDiscordId(userId);
+  async ensureProfileExists(userId, tx = null) {
+    const existing = await this.userRepository.findByDiscordId(userId, tx);
     if (existing) {
       return existing;
     }
 
     const defaultProfile = createDefaultProfile(userId);
-    return this.userRepository.create(defaultProfile);
+    try {
+      return await this.userRepository.create(defaultProfile, tx);
+    } catch (error) {
+      if (error && error.code === 'ER_DUP_ENTRY') {
+        return this.userRepository.findByDiscordId(userId, tx);
+      }
+      throw error;
+    }
   }
 
   async getProfile(profileDto) {
@@ -47,11 +55,13 @@ class ProfileService {
   }
 
   async updateProfile(profileDto) {
-    const current = await this.ensureProfileExists(profileDto.userId);
-    const updated = applyProfileUpdate(current, profileDto);
+    const saved = await this.transactionManager.runInTransaction(async (tx) => {
+      const current = await this.ensureProfileExists(profileDto.userId, tx);
+      const updated = applyProfileUpdate(current, profileDto);
+      return this.userRepository.update(updated, tx);
+    });
 
     // required order: DB write -> delete L2 -> delete local L1 -> publish invalidation event
-    const saved = await this.userRepository.update(updated);
     await this.userCacheRepository.deleteProfile(profileDto.userId);
 
     await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, 'cache.invalidate', {
