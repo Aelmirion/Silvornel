@@ -32,6 +32,7 @@ function registerInfraModule(container) {
   container.bind(TOKENS.ModerationConsumer, (c) => new ModerationConsumer({
     queueClient: c.resolve(TOKENS.QueueClient),
     envConfig: c.resolve(TOKENS.EnvConfig),
+    warningRepository: c.resolve(TOKENS.WarningRepository),
     logger: c.resolve(TOKENS.Logger)
   }));
   container.bind(TOKENS.RetryConsumer, (c) => new RetryConsumer({

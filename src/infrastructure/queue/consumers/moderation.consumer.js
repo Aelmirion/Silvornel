@@ -4,19 +4,18 @@ const { setTimeout: sleep } = require('timers/promises');
 const { QUEUE_NAMES } = require('../../../config/constants/queue.names');
 const { computeBackoffMs } = require('../../../core/utils/backoff');
 const { withTimeout } = require('../../../core/utils/timeout');
-const { createIdempotencyKey } = require('../../../core/utils/idempotency');
 
 const MODERATION_DEAD_LETTER_QUEUE = `${QUEUE_NAMES.moderation}:dead-letter`;
+const CONSUMER_EFFECT_TYPE_PREFIX = 'consumer_execute';
 
 class ModerationConsumer {
-  constructor({ queueClient, envConfig, moderationActionService, logger }) {
+  constructor({ queueClient, envConfig, moderationActionService, warningRepository, logger }) {
     this.queueClient = queueClient;
     this.envConfig = envConfig;
     this.moderationActionService = moderationActionService;
+    this.warningRepository = warningRepository;
     this.logger = logger;
     this.timeoutMs = envConfig?.runtime?.externalCallTimeoutMs ?? 2000;
-    this.lockTtlSeconds = Math.max(30, Math.ceil(this.timeoutMs / 1000) + 30);
-    this.completedTtlSeconds = 86_400;
     this.pollTimeoutSeconds = 1;
     this.visibilityTimeoutMs = Math.max(this.timeoutMs + 10_000, 30_000);
     this.isRunning = false;
@@ -94,14 +93,36 @@ class ModerationConsumer {
       attempt: job.attempt || 0
     });
 
-    const idempotencyId = job.moderationActionId || job.traceId || job.jobId || `${job.guildId}:${job.userId}:${job.action}`;
-    const idempotencyBaseKey = createIdempotencyKey('v1:idem:moderation_action', idempotencyId);
-    const completedKey = `${idempotencyBaseKey}:done`;
-    const lockKey = `${idempotencyBaseKey}:lock`;
+    if (!job.moderationActionId) {
+      this.logger?.error?.('Queue job rejected (missing moderationActionId)', {
+        correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
+        userId: job.userId || null,
+        guildId: job.guildId || null,
+        queueName: QUEUE_NAMES.moderation,
+        action: job.action || null
+      });
+      await this.queueClient.enqueue(MODERATION_DEAD_LETTER_QUEUE, {
+        ...job,
+        failedAt: Date.now(),
+        error: 'missing moderationActionId'
+      });
+      await this.queueClient.ack(QUEUE_NAMES.moderation, reservationToken);
+      return;
+    }
 
-    const alreadyCompleted = await this.queueClient.redisClient.get(completedKey);
-    if (alreadyCompleted) {
-      this.logger?.debug?.('Queue job skipped (already completed)', {
+    const effectType = `${CONSUMER_EFFECT_TYPE_PREFIX}:${job.action || 'unknown'}`;
+    const accepted = await this.warningRepository.registerModerationEffectExecution({
+      moderationActionId: job.moderationActionId,
+      effectType,
+      guildId: job.guildId || 'unknown',
+      userId: job.userId || 'unknown',
+      actionType: job.action || 'unknown',
+      correlationId: job.correlationId || null,
+      causationId: job.causationId || job.correlationId || null
+    });
+    if (!accepted) {
+      this.logger?.debug?.('Queue job skipped (already executed)', {
         correlationId: job.correlationId || job.traceId || null,
         causationId: job.causationId || null,
         userId: job.userId || null,
@@ -113,34 +134,12 @@ class ModerationConsumer {
       return;
     }
 
-    const acquired = await this.queueClient.redisClient.set(lockKey, '1', {
-      NX: true,
-      EX: this.lockTtlSeconds
-    });
-
-    if (!acquired) {
-      this.logger?.debug?.('Queue job skipped (lock not acquired)', {
-        correlationId: job.correlationId || job.traceId || null,
-        causationId: job.causationId || null,
-        userId: job.userId || null,
-        guildId: job.guildId || null,
-        queueName: QUEUE_NAMES.moderation,
-        action: job.action || null
-      });
-      return;
-    }
-
     try {
       await withTimeout(
         () => this.executeAction(job),
         this.timeoutMs,
         `moderation:${job.action || 'unknown'}`
       );
-
-      await this.queueClient.redisClient.multi()
-        .set(completedKey, '1', { EX: this.completedTtlSeconds })
-        .del(lockKey)
-        .exec();
       await this.queueClient.ack(QUEUE_NAMES.moderation, reservationToken);
       this.logger?.info?.('Queue job processing completed', {
         correlationId: job.correlationId || job.traceId || null,
@@ -151,7 +150,10 @@ class ModerationConsumer {
         action: job.action || null
       });
     } catch (error) {
-      await this.queueClient.redisClient.del(lockKey);
+      await this.warningRepository.unregisterModerationEffectExecution({
+        moderationActionId: job.moderationActionId,
+        effectType
+      });
       await this.handleFailure(job, reservationToken, error);
     }
   }

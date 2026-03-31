@@ -53,6 +53,11 @@ class WarningRepository extends WarningRepositoryContract {
       EXTERNAL_TIMEOUT_MS,
       'db.query.ensureEventOutboxTable'
     );
+    await withTimeout(
+      () => connection.query(this.moderationSql.ensureModerationEffectExecutionsTable),
+      EXTERNAL_TIMEOUT_MS,
+      'db.query.ensureModerationEffectExecutionsTable'
+    );
     this.schemaReady = true;
   }
 
@@ -139,6 +144,47 @@ class WarningRepository extends WarningRepositoryContract {
         'db.query.insertOutboxEvent'
       );
     }, 'createOutboxEvent');
+  }
+
+  async registerModerationEffectExecution({
+    moderationActionId,
+    effectType,
+    guildId,
+    userId,
+    actionType,
+    correlationId = null,
+    causationId = null
+  }, tx = null) {
+    return this.withConnection(tx, async (connection) => {
+      await this.ensureReliabilitySchema(connection);
+      try {
+        await withTimeout(
+          () => connection.query(
+            this.moderationSql.insertModerationEffectExecution,
+            [moderationActionId, effectType, guildId, userId, actionType, correlationId, causationId, new Date().toISOString()]
+          ),
+          EXTERNAL_TIMEOUT_MS,
+          'db.query.insertModerationEffectExecution'
+        );
+        return true;
+      } catch (error) {
+        if (error && (error.code === 'ER_DUP_ENTRY' || String(error.message || '').includes('Duplicate'))) {
+          return false;
+        }
+        throw error;
+      }
+    }, 'registerModerationEffectExecution');
+  }
+
+  async unregisterModerationEffectExecution({ moderationActionId, effectType }, tx = null) {
+    return this.withConnection(tx, async (connection) => {
+      await this.ensureReliabilitySchema(connection);
+      await withTimeout(
+        () => connection.query(this.moderationSql.deleteModerationEffectExecution, [moderationActionId, effectType]),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.deleteModerationEffectExecution'
+      );
+    }, 'unregisterModerationEffectExecution');
   }
 
   async markOutboxPublished(eventId, tx = null) {
