@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node index.js",
     "start:shard": "node bot.js",
-    "check": "node --check index.js && node --check bot.js"
+    "check": "node --check index.js && node --check bot.js",
+    "test": "node --test tests/system/distributed.invariants.test.js",
+    "test:system": "node --test tests/system/distributed.invariants.test.js"
   },
   "dependencies": {
     "discord.js": "^14.22.1",
