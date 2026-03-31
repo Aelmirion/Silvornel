@@ -8,8 +8,10 @@
     "start": "node index.js",
     "start:shard": "node bot.js",
     "check": "node --check index.js && node --check bot.js",
-    "test": "node --test tests/system/distributed.invariants.test.js",
-    "test:system": "node --test tests/system/distributed.invariants.test.js"
+    "test": "npm run test:system:local",
+    "test:system": "npm run test:system:local",
+    "test:system:local": "REDIS_KEY_PREFIX=test: TEST_MODE=local node --test tests/system/distributed.invariants.test.js",
+    "test:system:ci": "REDIS_KEY_PREFIX=test: TEST_MODE=ci node --test tests/system/distributed.invariants.test.js"
   },
   "dependencies": {
     "discord.js": "^14.22.1",

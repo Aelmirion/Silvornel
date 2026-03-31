@@ -6,12 +6,13 @@ class QueueClient {
   constructor({ redisClient, circuitBreaker, envConfig, logger }) {
     this.redisClient = redisClient;
     this.circuitBreaker = circuitBreaker;
+    this.envConfig = envConfig;
+    this.logger = logger;
     this.defaultVisibilityTimeoutMs = 30_000;
     this.requeueBatchSize = 25;
     this.delayedBatchSize = 25;
-    this.delayedQueueKeyName = 'delayed_jobs';
-    this.envConfig = envConfig;
-    this.logger = logger;
+    const keyPrefix = this.envConfig?.redis?.keyPrefix || process.env.REDIS_KEY_PREFIX || '';
+    this.delayedQueueKeyName = `${keyPrefix}delayed_jobs`;
 
     // Queue safety note: Redis persistence is required for crash durability.
     // If AOF is not enabled on Redis, this queue is at-most-memory and jobs can be lost on Redis restart.

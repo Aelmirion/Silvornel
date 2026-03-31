@@ -4,13 +4,13 @@ const { setTimeout: sleep } = require('timers/promises');
 const { REDIS_CHANNELS } = require('../../../config/constants/redis.channels');
 
 class RetryConsumer {
-  constructor({ queueClient, warningRepository, pubSubService, logger }) {
+  constructor({ queueClient, warningRepository, pubSubService, logger, envConfig }) {
     this.queueClient = queueClient;
     this.warningRepository = warningRepository;
     this.pubSubService = pubSubService;
     this.logger = logger;
     this.isRunning = false;
-    this.pollIntervalMs = 1000;
+    this.pollIntervalMs = Math.max(50, envConfig?.queue?.schedulerIntervalMs ?? 1000);
   }
 
   async start() {
