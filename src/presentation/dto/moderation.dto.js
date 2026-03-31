@@ -10,12 +10,13 @@ const ACTION_BY_COMMAND = Object.freeze({
 });
 
 class ModerationDto {
-  constructor({ action, guildId, moderatorId, targetUserId, reason = null }) {
+  constructor({ action, guildId, moderatorId, targetUserId, reason = null, correlationId = null }) {
     this.action = action;
     this.guildId = guildId;
     this.moderatorId = moderatorId;
     this.targetUserId = targetUserId;
     this.reason = reason;
+    this.correlationId = correlationId;
   }
 
   static fromCommand(commandDto) {
@@ -47,7 +48,8 @@ class ModerationDto {
       guildId: commandDto.guildId,
       moderatorId: commandDto.userId,
       targetUserId: targetUser,
-      reason: normalizedReason
+      reason: normalizedReason,
+      correlationId: commandDto.correlationId || null
     });
   }
 }

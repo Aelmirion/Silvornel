@@ -12,7 +12,11 @@ const { InteractionOrchestrator } = require('../../application/orchestrators/int
 
 function registerAppModule(container) {
   container.bind(TOKENS.CacheService, (c) => new CacheService({ l1Cache: c.resolve(TOKENS.L1Cache), cacheClient: c.resolve(TOKENS.CacheClient) }));
-  container.bind(TOKENS.QueueService, (c) => new QueueService({ queueClient: c.resolve(TOKENS.QueueClient), envConfig: c.resolve(TOKENS.EnvConfig) }));
+  container.bind(TOKENS.QueueService, (c) => new QueueService({
+    queueClient: c.resolve(TOKENS.QueueClient),
+    envConfig: c.resolve(TOKENS.EnvConfig),
+    logger: c.resolve(TOKENS.Logger)
+  }));
   container.bind(TOKENS.RateLimitService, (c) => new RateLimitService({ rateLimitClient: c.resolve(TOKENS.RateLimitClient) }));
   container.bind(TOKENS.PubSubService, (c) => new PubSubService({ publisher: c.resolve(TOKENS.Publisher), subscriber: c.resolve(TOKENS.SubClient) }));
   container.bind(TOKENS.PingService, () => new PingService());
@@ -25,7 +29,8 @@ function registerAppModule(container) {
     warningRepository: c.resolve(TOKENS.WarningRepository),
     warningCacheRepository: c.resolve(TOKENS.WarningCacheRepository),
     pubSubService: c.resolve(TOKENS.PubSubService),
-    queueService: c.resolve(TOKENS.QueueService)
+    queueService: c.resolve(TOKENS.QueueService),
+    logger: c.resolve(TOKENS.Logger)
   }));
   container.bind(TOKENS.InteractionOrchestrator, (c) => new InteractionOrchestrator({
     middlewarePipeline: c.resolve(TOKENS.MiddlewarePipeline),

@@ -42,8 +42,23 @@ class ModerationConsumer {
     }
 
     try {
-      return JSON.parse(result.element);
+      const job = JSON.parse(result.element);
+      this.logger?.debug?.('Queue job reserved', {
+        correlationId: job.correlationId || job.traceId || null,
+        userId: job.userId || null,
+        guildId: job.guildId || null,
+        queueName: QUEUE_NAMES.moderation,
+        action: job.action || null
+      });
+      return job;
     } catch (error) {
+      this.logger?.error?.('Queue job parsing failed', {
+        correlationId: null,
+        userId: null,
+        guildId: null,
+        queueName: QUEUE_NAMES.moderation,
+        error: error.message
+      });
       await this.queueClient.enqueue(MODERATION_DEAD_LETTER_QUEUE, {
         type: 'invalid_job',
         payload: result.element,
@@ -55,6 +70,15 @@ class ModerationConsumer {
   }
 
   async processJob(job) {
+    this.logger?.info?.('Queue job processing started', {
+      correlationId: job.correlationId || job.traceId || null,
+      userId: job.userId || null,
+      guildId: job.guildId || null,
+      queueName: QUEUE_NAMES.moderation,
+      action: job.action || null,
+      attempt: job.attempt || 0
+    });
+
     const idempotencyId = job.traceId || job.jobId || `${job.guildId}:${job.userId}:${job.action}`;
     const idempotencyBaseKey = createIdempotencyKey('v1:idem:moderation_action', idempotencyId);
     const completedKey = `${idempotencyBaseKey}:done`;
@@ -62,6 +86,13 @@ class ModerationConsumer {
 
     const alreadyCompleted = await this.queueClient.redisClient.get(completedKey);
     if (alreadyCompleted) {
+      this.logger?.debug?.('Queue job skipped (already completed)', {
+        correlationId: job.correlationId || job.traceId || null,
+        userId: job.userId || null,
+        guildId: job.guildId || null,
+        queueName: QUEUE_NAMES.moderation,
+        action: job.action || null
+      });
       return;
     }
 
@@ -71,6 +102,13 @@ class ModerationConsumer {
     });
 
     if (!acquired) {
+      this.logger?.debug?.('Queue job skipped (lock not acquired)', {
+        correlationId: job.correlationId || job.traceId || null,
+        userId: job.userId || null,
+        guildId: job.guildId || null,
+        queueName: QUEUE_NAMES.moderation,
+        action: job.action || null
+      });
       return;
     }
 
@@ -85,6 +123,13 @@ class ModerationConsumer {
         .set(completedKey, '1', { EX: this.completedTtlSeconds })
         .del(lockKey)
         .exec();
+      this.logger?.info?.('Queue job processing completed', {
+        correlationId: job.correlationId || job.traceId || null,
+        userId: job.userId || null,
+        guildId: job.guildId || null,
+        queueName: QUEUE_NAMES.moderation,
+        action: job.action || null
+      });
     } catch (error) {
       await this.queueClient.redisClient.del(lockKey);
       await this.handleFailure(job, error);
@@ -99,6 +144,7 @@ class ModerationConsumer {
 
     if (this.logger?.info) {
       this.logger.info('Moderation action executed (placeholder)', {
+        correlationId: job.correlationId || job.traceId || null,
         action: job.action,
         guildId: job.guildId,
         userId: job.userId,
@@ -119,8 +165,19 @@ class ModerationConsumer {
   async handleFailure(job, error) {
     const attempt = Number.isInteger(job.attempt) ? job.attempt + 1 : 1;
     const maxAttempts = Number.isInteger(job.maxAttempts) ? job.maxAttempts : 3;
+    const failureMeta = {
+      correlationId: job.correlationId || job.traceId || null,
+      userId: job.userId || null,
+      guildId: job.guildId || null,
+      queueName: QUEUE_NAMES.moderation,
+      action: job.action || null,
+      attempt,
+      maxAttempts,
+      error: error.message
+    };
 
     if (attempt >= maxAttempts) {
+      this.logger?.error?.('Queue job failed permanently', failureMeta);
       await this.queueClient.enqueue(MODERATION_DEAD_LETTER_QUEUE, {
         ...job,
         attempt,
@@ -131,6 +188,10 @@ class ModerationConsumer {
     }
 
     const backoffMs = computeBackoffMs(attempt, this.envConfig?.redis?.retryBaseMs ?? 100);
+    this.logger?.warn?.('Queue job failed, retry scheduled', {
+      ...failureMeta,
+      backoffMs
+    });
     await sleep(backoffMs);
 
     await this.queueClient.enqueue(QUEUE_NAMES.moderation, {
