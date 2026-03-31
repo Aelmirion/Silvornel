@@ -23,14 +23,16 @@ function registerAppModule(container) {
   container.bind(TOKENS.ProfileService, (c) => new ProfileService({
     userRepository: c.resolve(TOKENS.UserRepository),
     userCacheRepository: c.resolve(TOKENS.UserCacheRepository),
-    pubSubService: c.resolve(TOKENS.PubSubService)
+    pubSubService: c.resolve(TOKENS.PubSubService),
+    transactionManager: c.resolve(TOKENS.TransactionManager)
   }));
   container.bind(TOKENS.ModerationService, (c) => new ModerationService({
     warningRepository: c.resolve(TOKENS.WarningRepository),
     warningCacheRepository: c.resolve(TOKENS.WarningCacheRepository),
     pubSubService: c.resolve(TOKENS.PubSubService),
     queueService: c.resolve(TOKENS.QueueService),
-    logger: c.resolve(TOKENS.Logger)
+    logger: c.resolve(TOKENS.Logger),
+    transactionManager: c.resolve(TOKENS.TransactionManager)
   }));
   container.bind(TOKENS.InteractionOrchestrator, (c) => new InteractionOrchestrator({
     middlewarePipeline: c.resolve(TOKENS.MiddlewarePipeline),

@@ -3,21 +3,25 @@
 class TransactionManager {
   constructor({ pool }) {
     this.pool = pool;
-    this.hasWarnedNoop = false;
-  }
-
-  warnNoop() {
-    if (this.hasWarnedNoop) {
-      return;
-    }
-
-    this.hasWarnedNoop = true;
-    console.warn('[TransactionManager] runInTransaction is a NO-OP. Operations are executed without transactional guarantees.');
   }
 
   async runInTransaction(handler) {
-    this.warnNoop();
-    return handler(null);
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const result = await handler(connection);
+      await connection.commit();
+      return result;
+    } catch (error) {
+      try {
+        await connection.rollback();
+      } catch (_rollbackError) {
+        // rollback best-effort
+      }
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 }
 
