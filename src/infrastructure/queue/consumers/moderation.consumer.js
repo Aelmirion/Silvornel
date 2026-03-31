@@ -18,6 +18,7 @@ class ModerationConsumer {
     this.lockTtlSeconds = Math.max(30, Math.ceil(this.timeoutMs / 1000) + 30);
     this.completedTtlSeconds = 86_400;
     this.pollTimeoutSeconds = 1;
+    this.visibilityTimeoutMs = Math.max(this.timeoutMs + 10_000, 30_000);
     this.isRunning = false;
   }
 
@@ -25,24 +26,32 @@ class ModerationConsumer {
     this.isRunning = true;
 
     while (this.isRunning) {
-      const job = await this.receiveJob();
-      if (!job || job.type !== 'moderation_action') {
+      const reserved = await this.receiveJob();
+      if (!reserved) {
         continue;
       }
 
-      await this.processJob(job);
+      if (reserved.job.type !== 'moderation_action') {
+        await this.queueClient.ack(QUEUE_NAMES.moderation, reserved.reservationToken);
+        continue;
+      }
+
+      await this.processJob(reserved);
     }
   }
 
   async receiveJob() {
-    const result = await this.queueClient.redisClient.blPop(QUEUE_NAMES.moderation, this.pollTimeoutSeconds);
+    const reserved = await this.queueClient.reserve(QUEUE_NAMES.moderation, {
+      blockTimeoutSeconds: this.pollTimeoutSeconds,
+      visibilityTimeoutMs: this.visibilityTimeoutMs
+    });
 
-    if (!result || !result.element) {
+    if (!reserved || !reserved.rawJob) {
       return null;
     }
 
     try {
-      const job = JSON.parse(result.element);
+      const job = JSON.parse(reserved.rawJob);
       this.logger?.debug?.('Queue job reserved', {
         correlationId: job.correlationId || job.traceId || null,
         causationId: job.causationId || null,
@@ -51,7 +60,10 @@ class ModerationConsumer {
         queueName: QUEUE_NAMES.moderation,
         action: job.action || null
       });
-      return job;
+      return {
+        ...reserved,
+        job
+      };
     } catch (error) {
       this.logger?.error?.('Queue job parsing failed', {
         correlationId: null,
@@ -62,15 +74,16 @@ class ModerationConsumer {
       });
       await this.queueClient.enqueue(MODERATION_DEAD_LETTER_QUEUE, {
         type: 'invalid_job',
-        payload: result.element,
+        payload: reserved.rawJob,
         failedAt: Date.now(),
         error: error.message
       });
+      await this.queueClient.ack(QUEUE_NAMES.moderation, reserved.reservationToken);
       return null;
     }
   }
 
-  async processJob(job) {
+  async processJob({ reservationToken, job }) {
     this.logger?.info?.('Queue job processing started', {
       correlationId: job.correlationId || job.traceId || null,
       causationId: job.causationId || null,
@@ -96,6 +109,7 @@ class ModerationConsumer {
         queueName: QUEUE_NAMES.moderation,
         action: job.action || null
       });
+      await this.queueClient.ack(QUEUE_NAMES.moderation, reservationToken);
       return;
     }
 
@@ -127,6 +141,7 @@ class ModerationConsumer {
         .set(completedKey, '1', { EX: this.completedTtlSeconds })
         .del(lockKey)
         .exec();
+      await this.queueClient.ack(QUEUE_NAMES.moderation, reservationToken);
       this.logger?.info?.('Queue job processing completed', {
         correlationId: job.correlationId || job.traceId || null,
         causationId: job.causationId || null,
@@ -137,7 +152,7 @@ class ModerationConsumer {
       });
     } catch (error) {
       await this.queueClient.redisClient.del(lockKey);
-      await this.handleFailure(job, error);
+      await this.handleFailure(job, reservationToken, error);
     }
   }
 
@@ -168,7 +183,7 @@ class ModerationConsumer {
     });
   }
 
-  async handleFailure(job, error) {
+  async handleFailure(job, reservationToken, error) {
     const attempt = Number.isInteger(job.attempt) ? job.attempt + 1 : 1;
     const maxAttempts = Number.isInteger(job.maxAttempts) ? job.maxAttempts : 3;
     const failureMeta = {
@@ -191,6 +206,7 @@ class ModerationConsumer {
         failedAt: Date.now(),
         error: error.message
       });
+      await this.queueClient.ack(QUEUE_NAMES.moderation, reservationToken);
       return;
     }
 
@@ -201,7 +217,7 @@ class ModerationConsumer {
     });
     await sleep(backoffMs);
 
-    await this.queueClient.enqueue(QUEUE_NAMES.moderation, {
+    await this.queueClient.requeue(QUEUE_NAMES.moderation, reservationToken, {
       ...job,
       attempt,
       runAt: Date.now() + backoffMs,
