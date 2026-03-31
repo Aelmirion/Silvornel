@@ -80,20 +80,6 @@ class ModerationService {
       return this.buildWarningsResponse(dto, await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId), 'idempotent');
     }
 
-    const warning = await this.runStep('db_write_warning', dto, async () => this.transactionManager.runInTransaction((tx) => this.warningRepository.createWarning(new Warning({
-      guildId: dto.guildId,
-      userId: dto.targetUserId,
-      moderatorId: dto.moderatorId,
-      reason: dto.reason
-    }), tx)));
-
-    await this.runStep('cache_invalidation', dto, async () => {
-      if (this.warningCacheRepository) {
-        await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
-        this.warningCacheRepository.markRecentWrite(dto.guildId, dto.targetUserId);
-      }
-    });
-
     const cacheInvalidationEvent = {
       eventId: randomUUID(),
       guildId: dto.guildId,
@@ -101,13 +87,31 @@ class ModerationService {
       entity: 'warnings',
       originShard: process.env.SHARD_ID || '0'
     };
-    await this.warningRepository.createOutboxEvent({
-      eventId: cacheInvalidationEvent.eventId,
-      destination: REDIS_CHANNELS.cacheInvalidate,
-      eventType: 'cache.invalidate',
-      payload: cacheInvalidationEvent,
-      correlationId: dto.correlationId,
-      causationId: dto.causationId || dto.correlationId || null
+    const warning = await this.runStep('db_write_warning', dto, async () => this.transactionManager.runInTransaction(async (tx) => {
+      const createdWarning = await this.warningRepository.createWarning(new Warning({
+        guildId: dto.guildId,
+        userId: dto.targetUserId,
+        moderatorId: dto.moderatorId,
+        reason: dto.reason
+      }), tx);
+
+      await this.warningRepository.createOutboxEvent({
+        eventId: cacheInvalidationEvent.eventId,
+        destination: REDIS_CHANNELS.cacheInvalidate,
+        eventType: 'cache.invalidate',
+        payload: cacheInvalidationEvent,
+        correlationId: dto.correlationId,
+        causationId: dto.causationId || dto.correlationId || null
+      }, tx);
+
+      return createdWarning;
+    }));
+
+    await this.runStep('cache_invalidation', dto, async () => {
+      if (this.warningCacheRepository) {
+        await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
+        this.warningCacheRepository.markRecentWrite(dto.guildId, dto.targetUserId);
+      }
     });
     await this.runStep('pubsub_publish', dto, async () => this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, 'cache.invalidate', cacheInvalidationEvent, {
       correlationId: dto.correlationId || null,
@@ -235,15 +239,6 @@ class ModerationService {
       return this.buildWarningsResponse(dto, await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId), 'idempotent');
     }
 
-    const deletedCount = await this.runStep('db_delete_warnings', dto, async () => this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId));
-
-    await this.runStep('cache_invalidation', dto, async () => {
-      if (this.warningCacheRepository) {
-        await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
-        this.warningCacheRepository.markRecentWrite(dto.guildId, dto.targetUserId);
-      }
-    });
-
     const cacheInvalidationEvent = {
       eventId: randomUUID(),
       guildId: dto.guildId,
@@ -251,13 +246,24 @@ class ModerationService {
       entity: 'warnings',
       originShard: process.env.SHARD_ID || '0'
     };
-    await this.warningRepository.createOutboxEvent({
-      eventId: cacheInvalidationEvent.eventId,
-      destination: REDIS_CHANNELS.cacheInvalidate,
-      eventType: 'cache.invalidate',
-      payload: cacheInvalidationEvent,
-      correlationId: dto.correlationId,
-      causationId: dto.causationId || dto.correlationId || null
+    const deletedCount = await this.runStep('db_delete_warnings', dto, async () => this.transactionManager.runInTransaction(async (tx) => {
+      const deleted = await this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId, tx);
+      await this.warningRepository.createOutboxEvent({
+        eventId: cacheInvalidationEvent.eventId,
+        destination: REDIS_CHANNELS.cacheInvalidate,
+        eventType: 'cache.invalidate',
+        payload: cacheInvalidationEvent,
+        correlationId: dto.correlationId,
+        causationId: dto.causationId || dto.correlationId || null
+      }, tx);
+      return deleted;
+    }));
+
+    await this.runStep('cache_invalidation', dto, async () => {
+      if (this.warningCacheRepository) {
+        await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
+        this.warningCacheRepository.markRecentWrite(dto.guildId, dto.targetUserId);
+      }
     });
     await this.runStep('pubsub_publish', dto, async () => this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, 'cache.invalidate', cacheInvalidationEvent, {
       correlationId: dto.correlationId || null,
