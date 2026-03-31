@@ -54,11 +54,14 @@ class ProfileService {
     const saved = await this.userRepository.update(updated);
     await this.userCacheRepository.deleteProfile(profileDto.userId);
 
-    await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, {
+    await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, 'cache.invalidate', {
       eventId: randomUUID(),
-      schemaVersion: EVENT_SCHEMA.current,
       userId: profileDto.userId,
       originShard: process.env.SHARD_ID || '0'
+    }, {
+      correlationId: profileDto.correlationId || null,
+      causationId: profileDto.causationId || profileDto.correlationId || null,
+      schemaVersion: EVENT_SCHEMA.current
     });
 
     return {

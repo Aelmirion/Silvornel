@@ -45,6 +45,7 @@ class ModerationConsumer {
       const job = JSON.parse(result.element);
       this.logger?.debug?.('Queue job reserved', {
         correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
         userId: job.userId || null,
         guildId: job.guildId || null,
         queueName: QUEUE_NAMES.moderation,
@@ -72,6 +73,7 @@ class ModerationConsumer {
   async processJob(job) {
     this.logger?.info?.('Queue job processing started', {
       correlationId: job.correlationId || job.traceId || null,
+      causationId: job.causationId || null,
       userId: job.userId || null,
       guildId: job.guildId || null,
       queueName: QUEUE_NAMES.moderation,
@@ -79,7 +81,7 @@ class ModerationConsumer {
       attempt: job.attempt || 0
     });
 
-    const idempotencyId = job.traceId || job.jobId || `${job.guildId}:${job.userId}:${job.action}`;
+    const idempotencyId = job.moderationActionId || job.traceId || job.jobId || `${job.guildId}:${job.userId}:${job.action}`;
     const idempotencyBaseKey = createIdempotencyKey('v1:idem:moderation_action', idempotencyId);
     const completedKey = `${idempotencyBaseKey}:done`;
     const lockKey = `${idempotencyBaseKey}:lock`;
@@ -88,6 +90,7 @@ class ModerationConsumer {
     if (alreadyCompleted) {
       this.logger?.debug?.('Queue job skipped (already completed)', {
         correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
         userId: job.userId || null,
         guildId: job.guildId || null,
         queueName: QUEUE_NAMES.moderation,
@@ -104,6 +107,7 @@ class ModerationConsumer {
     if (!acquired) {
       this.logger?.debug?.('Queue job skipped (lock not acquired)', {
         correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
         userId: job.userId || null,
         guildId: job.guildId || null,
         queueName: QUEUE_NAMES.moderation,
@@ -125,6 +129,7 @@ class ModerationConsumer {
         .exec();
       this.logger?.info?.('Queue job processing completed', {
         correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
         userId: job.userId || null,
         guildId: job.guildId || null,
         queueName: QUEUE_NAMES.moderation,
@@ -145,6 +150,7 @@ class ModerationConsumer {
     if (this.logger?.info) {
       this.logger.info('Moderation action executed (placeholder)', {
         correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
         action: job.action,
         guildId: job.guildId,
         userId: job.userId,
@@ -167,6 +173,7 @@ class ModerationConsumer {
     const maxAttempts = Number.isInteger(job.maxAttempts) ? job.maxAttempts : 3;
     const failureMeta = {
       correlationId: job.correlationId || job.traceId || null,
+      causationId: job.causationId || null,
       userId: job.userId || null,
       guildId: job.guildId || null,
       queueName: QUEUE_NAMES.moderation,

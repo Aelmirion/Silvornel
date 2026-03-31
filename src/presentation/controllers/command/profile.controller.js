@@ -13,7 +13,9 @@ class ProfileController {
       commandName: interactionDto.commandName,
       userId: interactionDto.userId,
       guildId: interactionDto.guildId,
-      options: interactionDto.options
+      options: interactionDto.options,
+      correlationId: interactionDto.correlationId || interactionDto.id || null,
+      causationId: interactionDto.causationId || interactionDto.id || null
     });
 
     const profileDto = ProfileDto.fromCommand(commandDto);

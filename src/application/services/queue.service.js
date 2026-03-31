@@ -12,6 +12,7 @@ class QueueService {
     if (queueLength >= this.envConfig.queue.maxLength) {
       this.logger?.warn?.('Queue backpressure threshold reached', {
         correlationId: job?.correlationId || job?.traceId || null,
+        causationId: job?.causationId || null,
         userId: job?.userId || null,
         guildId: job?.guildId || null,
         queueName,
@@ -23,6 +24,7 @@ class QueueService {
 
     this.logger?.info?.('Queue job enqueued', {
       correlationId: job?.correlationId || job?.traceId || null,
+      causationId: job?.causationId || null,
       userId: job?.userId || null,
       guildId: job?.guildId || null,
       queueName

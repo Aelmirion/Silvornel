@@ -35,7 +35,10 @@ function registerInfraModule(container) {
     logger: c.resolve(TOKENS.Logger)
   }));
   container.bind(TOKENS.RetryConsumer, (c) => new RetryConsumer({
-    queueClient: c.resolve(TOKENS.QueueClient)
+    queueClient: c.resolve(TOKENS.QueueClient),
+    warningRepository: c.resolve(TOKENS.WarningRepository),
+    pubSubService: c.resolve(TOKENS.PubSubService),
+    logger: c.resolve(TOKENS.Logger)
   }));
   container.bind(TOKENS.DeadLetterWorker, () => new DeadLetterWorker());
 }

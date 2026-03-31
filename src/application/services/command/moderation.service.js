@@ -20,6 +20,7 @@ class ModerationService {
   buildLogContext(dto, extra = {}) {
     return {
       correlationId: dto?.correlationId || null,
+      causationId: dto?.causationId || dto?.correlationId || null,
       userId: dto?.targetUserId || dto?.moderatorId || null,
       guildId: dto?.guildId || null,
       ...extra
@@ -31,13 +32,16 @@ class ModerationService {
       return;
     }
 
-    await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, {
+    await this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, 'cache.invalidate', {
       eventId: randomUUID(),
-      schemaVersion: EVENT_SCHEMA.current,
       guildId: dto.guildId,
       userId: dto.targetUserId,
       entity: 'warnings',
       originShard: process.env.SHARD_ID || '0'
+    }, {
+      correlationId: dto.correlationId || null,
+      causationId: dto.causationId || dto.correlationId || null,
+      schemaVersion: EVENT_SCHEMA.current
     });
   }
 
@@ -59,6 +63,22 @@ class ModerationService {
       moderatorId: dto.moderatorId
     }));
 
+    const accepted = await this.warningRepository.registerModerationAction({
+      moderationActionId: dto.moderationActionId,
+      guildId: dto.guildId,
+      userId: dto.targetUserId,
+      actionType: dto.action,
+      correlationId: dto.correlationId,
+      causationId: dto.causationId
+    });
+    if (!accepted) {
+      this.logger?.warn?.('Duplicate moderation action suppressed', this.buildLogContext(dto, {
+        action: 'warn',
+        moderationActionId: dto.moderationActionId
+      }));
+      return this.buildWarningsResponse(dto, await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId), 'idempotent');
+    }
+
     const warning = await this.runStep('db_write_warning', dto, async () => this.warningRepository.createWarning(new Warning({
       guildId: dto.guildId,
       userId: dto.targetUserId,
@@ -69,10 +89,30 @@ class ModerationService {
     await this.runStep('cache_invalidation', dto, async () => {
       if (this.warningCacheRepository) {
         await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
+        this.warningCacheRepository.markRecentWrite(dto.guildId, dto.targetUserId);
       }
     });
 
-    await this.runStep('pubsub_publish', dto, async () => this.publishWarningsInvalidation(dto));
+    const cacheInvalidationEvent = {
+      eventId: randomUUID(),
+      guildId: dto.guildId,
+      userId: dto.targetUserId,
+      entity: 'warnings',
+      originShard: process.env.SHARD_ID || '0'
+    };
+    await this.warningRepository.createOutboxEvent({
+      eventId: cacheInvalidationEvent.eventId,
+      destination: REDIS_CHANNELS.cacheInvalidate,
+      eventType: 'cache.invalidate',
+      payload: cacheInvalidationEvent,
+      correlationId: dto.correlationId,
+      causationId: dto.causationId || dto.correlationId || null
+    });
+    await this.runStep('pubsub_publish', dto, async () => this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, 'cache.invalidate', cacheInvalidationEvent, {
+      correlationId: dto.correlationId || null,
+      causationId: dto.causationId || dto.correlationId || null
+    }));
+    await this.warningRepository.markOutboxPublished(cacheInvalidationEvent.eventId);
 
     const warnings = await this.runStep('db_read_warnings', dto, async () => this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId));
     const warningCount = warnings.length;
@@ -85,7 +125,9 @@ class ModerationService {
         guildId: dto.guildId,
         action: moderationRule.action,
         reason: moderationRule.reason,
+        moderationActionId: dto.moderationActionId,
         correlationId: dto.correlationId || null,
+        causationId: dto.causationId || dto.correlationId || null,
         traceId: dto.traceId || dto.correlationId || randomUUID()
       }));
     }
@@ -121,7 +163,12 @@ class ModerationService {
     }));
 
     if (this.warningCacheRepository) {
-      const cachedWarnings = await this.warningCacheRepository.getWarnings(dto.guildId, dto.targetUserId);
+      const cachedWarnings = await this.warningCacheRepository.getWarningsSingleFlight(
+        dto.guildId,
+        dto.targetUserId,
+        async () => this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId),
+        this.warningsTtlSeconds
+      );
       if (Array.isArray(cachedWarnings)) {
         this.logger?.info?.('Moderation action completed', this.buildLogContext(dto, {
           action: 'warnings',
@@ -133,10 +180,6 @@ class ModerationService {
     }
 
     const warnings = await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId);
-
-    if (this.warningCacheRepository) {
-      await this.warningCacheRepository.setWarnings(dto.guildId, dto.targetUserId, warnings, this.warningsTtlSeconds);
-    }
 
     this.logger?.info?.('Moderation action completed', this.buildLogContext(dto, {
       action: 'warnings',
@@ -175,15 +218,51 @@ class ModerationService {
       moderatorId: dto.moderatorId
     }));
 
+    const accepted = await this.warningRepository.registerModerationAction({
+      moderationActionId: dto.moderationActionId,
+      guildId: dto.guildId,
+      userId: dto.targetUserId,
+      actionType: dto.action,
+      correlationId: dto.correlationId,
+      causationId: dto.causationId
+    });
+    if (!accepted) {
+      this.logger?.warn?.('Duplicate moderation action suppressed', this.buildLogContext(dto, {
+        action: 'clearwarnings',
+        moderationActionId: dto.moderationActionId
+      }));
+      return this.buildWarningsResponse(dto, await this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId), 'idempotent');
+    }
+
     const deletedCount = await this.runStep('db_delete_warnings', dto, async () => this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId));
 
     await this.runStep('cache_invalidation', dto, async () => {
       if (this.warningCacheRepository) {
         await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
+        this.warningCacheRepository.markRecentWrite(dto.guildId, dto.targetUserId);
       }
     });
 
-    await this.runStep('pubsub_publish', dto, async () => this.publishWarningsInvalidation(dto));
+    const cacheInvalidationEvent = {
+      eventId: randomUUID(),
+      guildId: dto.guildId,
+      userId: dto.targetUserId,
+      entity: 'warnings',
+      originShard: process.env.SHARD_ID || '0'
+    };
+    await this.warningRepository.createOutboxEvent({
+      eventId: cacheInvalidationEvent.eventId,
+      destination: REDIS_CHANNELS.cacheInvalidate,
+      eventType: 'cache.invalidate',
+      payload: cacheInvalidationEvent,
+      correlationId: dto.correlationId,
+      causationId: dto.causationId || dto.correlationId || null
+    });
+    await this.runStep('pubsub_publish', dto, async () => this.pubSubService.publish(REDIS_CHANNELS.cacheInvalidate, 'cache.invalidate', cacheInvalidationEvent, {
+      correlationId: dto.correlationId || null,
+      causationId: dto.causationId || dto.correlationId || null
+    }));
+    await this.warningRepository.markOutboxPublished(cacheInvalidationEvent.eventId);
 
     this.logger?.info?.('Moderation action completed', this.buildLogContext(dto, {
       action: 'clearwarnings',
