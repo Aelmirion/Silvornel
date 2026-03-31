@@ -26,6 +26,8 @@ function registerPresentationModule(container) {
   }));
 
   container.bind(TOKENS.MiddlewarePipeline, (c) => new MiddlewarePipeline({
+    logger: c.resolve(TOKENS.Logger),
+    metrics: c.resolve(TOKENS.Metrics),
     middlewares: [
       createErrorMiddleware({ errorMapper: c.resolve(TOKENS.ErrorMapper) }),
       tracingMiddleware,
