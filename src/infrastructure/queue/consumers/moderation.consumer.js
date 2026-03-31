@@ -6,7 +6,6 @@ const { computeBackoffMs } = require('../../../core/utils/backoff');
 const { withTimeout } = require('../../../core/utils/timeout');
 const { createIdempotencyKey } = require('../../../core/utils/idempotency');
 
-const MODERATION_RETRY_QUEUE = `${QUEUE_NAMES.moderation}:retry`;
 const MODERATION_DEAD_LETTER_QUEUE = `${QUEUE_NAMES.moderation}:dead-letter`;
 
 class ModerationConsumer {
@@ -132,20 +131,13 @@ class ModerationConsumer {
     }
 
     const backoffMs = computeBackoffMs(attempt, this.envConfig?.redis?.retryBaseMs ?? 100);
-
-    await this.queueClient.enqueue(MODERATION_RETRY_QUEUE, {
-      ...job,
-      attempt,
-      runAt: Date.now() + backoffMs,
-      lastError: error.message
-    });
-
     await sleep(backoffMs);
 
     await this.queueClient.enqueue(QUEUE_NAMES.moderation, {
       ...job,
       attempt,
-      runAt: Date.now() + backoffMs
+      runAt: Date.now() + backoffMs,
+      lastError: error.message
     });
   }
 }
