@@ -6,6 +6,7 @@ const TOKENS = Object.freeze({
   DbConfig: 'DbConfig',
   RedisConfig: 'RedisConfig',
   Logger: 'Logger',
+  Metrics: 'Metrics',
   ErrorMapper: 'ErrorMapper',
   LifecycleBootstrap: 'LifecycleBootstrap',
   DiscordClient: 'DiscordClient',
