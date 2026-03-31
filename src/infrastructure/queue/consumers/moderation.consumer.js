@@ -2,6 +2,7 @@
 
 const { QUEUE_NAMES } = require('../../../config/constants/queue.names');
 const { withTimeout } = require('../../../core/utils/timeout');
+const { computeBackoffMs } = require('../../../core/utils/backoff');
 
 const MODERATION_DEAD_LETTER_QUEUE = `${QUEUE_NAMES.moderation}:dead-letter`;
 const CONSUMER_EFFECT_TYPE_PREFIX = 'consumer_execute';
@@ -16,6 +17,8 @@ class ModerationConsumer {
     this.timeoutMs = envConfig?.runtime?.externalCallTimeoutMs ?? 2000;
     this.pollTimeoutSeconds = 1;
     this.visibilityTimeoutMs = Math.max(this.timeoutMs + 10_000, 30_000);
+    this.retryBaseMs = envConfig?.queue?.retryBaseMs ?? 1000;
+    this.maxAttempts = Math.max(1, envConfig?.queue?.maxAttempts ?? 5);
     this.isRunning = false;
   }
 
@@ -152,7 +155,53 @@ class ModerationConsumer {
         moderationActionId: job.moderationActionId,
         effectType
       });
-      this.logger?.warn?.('Queue job failed, waiting for visibility timeout retry', {
+      await this.scheduleRetry({ reservationToken, job, error });
+    }
+  }
+
+  async scheduleRetry({ reservationToken, job, error }) {
+    const nextAttempt = (job.attempt || 0) + 1;
+
+    if (nextAttempt >= this.maxAttempts) {
+      await this.queueClient.enqueue(MODERATION_DEAD_LETTER_QUEUE, {
+        ...job,
+        attempt: nextAttempt,
+        failedAt: Date.now(),
+        error: error.message
+      });
+      await this.queueClient.ack(QUEUE_NAMES.moderation, reservationToken);
+      this.logger?.error?.('Queue job exhausted retries and moved to dead letter queue', {
+        correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
+        userId: job.userId || null,
+        guildId: job.guildId || null,
+        queueName: QUEUE_NAMES.moderation,
+        action: job.action || null,
+        attempt: nextAttempt,
+        maxAttempts: this.maxAttempts,
+        error: error.message
+      });
+      return;
+    }
+
+    const backoffMs = computeBackoffMs(nextAttempt, this.retryBaseMs);
+    const nextRetryAt = Date.now() + backoffMs;
+    const retryJob = {
+      ...job,
+      attempt: nextAttempt,
+      lastError: error.message,
+      nextRetryAt
+    };
+
+    const scheduled = await this.queueClient.scheduleRetry(
+      QUEUE_NAMES.moderation,
+      reservationToken,
+      retryJob,
+      nextRetryAt
+    );
+
+    if (!scheduled) {
+      this.logger?.warn?.('Queue retry scheduling failed, falling back to visibility timeout', {
         correlationId: job.correlationId || job.traceId || null,
         causationId: job.causationId || null,
         userId: job.userId || null,
@@ -160,9 +209,24 @@ class ModerationConsumer {
         queueName: QUEUE_NAMES.moderation,
         action: job.action || null,
         error: error.message,
+        attempt: nextAttempt,
         visibilityTimeoutMs: this.visibilityTimeoutMs
       });
+      return;
     }
+
+    this.logger?.warn?.('Queue job failed and was scheduled for durable retry', {
+      correlationId: job.correlationId || job.traceId || null,
+      causationId: job.causationId || null,
+      userId: job.userId || null,
+      guildId: job.guildId || null,
+      queueName: QUEUE_NAMES.moderation,
+      action: job.action || null,
+      error: error.message,
+      attempt: nextAttempt,
+      backoffMs,
+      nextRetryAt
+    });
   }
 
   async executeAction(job) {

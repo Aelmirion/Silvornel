@@ -38,7 +38,9 @@ function createEnvConfig(env) {
     },
     queue: {
       executionMode: env.QUEUE_EXECUTION_MODE || 'in_shard',
-      maxLength: parseInteger(env.QUEUE_MAX_LENGTH, 1000)
+      maxLength: parseInteger(env.QUEUE_MAX_LENGTH, 1000),
+      retryBaseMs: parseInteger(env.QUEUE_RETRY_BASE_MS, 1000),
+      maxAttempts: parseInteger(env.QUEUE_MAX_ATTEMPTS, 5)
     },
     runtime: {
       externalCallTimeoutMs: parseInteger(env.EXTERNAL_CALL_TIMEOUT_MS, 2000)
