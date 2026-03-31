@@ -16,6 +16,8 @@ class ModerationConsumer {
     this.moderationActionService = moderationActionService;
     this.logger = logger;
     this.timeoutMs = envConfig?.runtime?.externalCallTimeoutMs ?? 2000;
+    this.lockTtlSeconds = Math.max(30, Math.ceil(this.timeoutMs / 1000) + 30);
+    this.completedTtlSeconds = 86_400;
     this.pollTimeoutSeconds = 1;
     this.isRunning = false;
   }
@@ -55,8 +57,19 @@ class ModerationConsumer {
 
   async processJob(job) {
     const idempotencyId = job.traceId || job.jobId || `${job.guildId}:${job.userId}:${job.action}`;
-    const idempotencyKey = createIdempotencyKey('v1:idem:moderation_action', idempotencyId);
-    const acquired = await this.queueClient.redisClient.set(idempotencyKey, '1', { NX: true, EX: 86_400 });
+    const idempotencyBaseKey = createIdempotencyKey('v1:idem:moderation_action', idempotencyId);
+    const completedKey = `${idempotencyBaseKey}:done`;
+    const lockKey = `${idempotencyBaseKey}:lock`;
+
+    const alreadyCompleted = await this.queueClient.redisClient.get(completedKey);
+    if (alreadyCompleted) {
+      return;
+    }
+
+    const acquired = await this.queueClient.redisClient.set(lockKey, '1', {
+      NX: true,
+      EX: this.lockTtlSeconds
+    });
 
     if (!acquired) {
       return;
@@ -68,7 +81,13 @@ class ModerationConsumer {
         this.timeoutMs,
         `moderation:${job.action || 'unknown'}`
       );
+
+      await this.queueClient.redisClient.multi()
+        .set(completedKey, '1', { EX: this.completedTtlSeconds })
+        .del(lockKey)
+        .exec();
     } catch (error) {
+      await this.queueClient.redisClient.del(lockKey);
       await this.handleFailure(job, error);
     }
   }
