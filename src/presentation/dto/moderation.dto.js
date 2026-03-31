@@ -1,6 +1,6 @@
 'use strict';
 
-const { createHash } = require('crypto');
+const { randomUUID } = require('crypto');
 const { DomainError } = require('../../core/errors/DomainError');
 const { validateWarningReason } = require('../../domain/rules/moderation.rules');
 const { sanitizeInput } = require('../../core/security/sanitizer');
@@ -48,10 +48,7 @@ class ModerationDto {
     const normalizedReason = action === 'warn' ? validateWarningReason(reasonInput) : null;
     const correlationId = commandDto.correlationId || null;
     const causationId = commandDto.causationId || correlationId;
-    const moderationActionId = createHash('sha256')
-      .update(`${action}:${commandDto.guildId}:${targetUser}:${correlationId || 'none'}`)
-      .digest('hex')
-      .slice(0, 48);
+    const moderationActionId = commandDto.moderationActionId || randomUUID();
 
     return new ModerationDto({
       action,

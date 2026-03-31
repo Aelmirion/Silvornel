@@ -30,6 +30,19 @@ const moderationSql = Object.freeze({
       published_at VARCHAR(40) NULL
     )
   `,
+  ensureModerationEffectExecutionsTable: `
+    CREATE TABLE IF NOT EXISTS moderation_effect_executions (
+      moderation_action_id VARCHAR(128) NOT NULL,
+      effect_type VARCHAR(64) NOT NULL,
+      guild_id VARCHAR(64) NOT NULL,
+      user_id VARCHAR(64) NOT NULL,
+      action_type VARCHAR(64) NOT NULL,
+      correlation_id VARCHAR(128) NULL,
+      causation_id VARCHAR(128) NULL,
+      created_at VARCHAR(40) NOT NULL,
+      PRIMARY KEY (moderation_action_id, effect_type)
+    )
+  `,
   insertOutboxEvent: `
     INSERT INTO event_outbox (event_id, destination, event_type, payload, status, correlation_id, causation_id, created_at)
     VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
@@ -45,6 +58,16 @@ const moderationSql = Object.freeze({
     WHERE status = 'pending'
     ORDER BY id ASC
     LIMIT ?
+  `,
+  insertModerationEffectExecution: `
+    INSERT INTO moderation_effect_executions (
+      moderation_action_id, effect_type, guild_id, user_id, action_type, correlation_id, causation_id, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  deleteModerationEffectExecution: `
+    DELETE FROM moderation_effect_executions
+    WHERE moderation_action_id = ? AND effect_type = ?
   `,
   createWarning: `
     INSERT INTO warnings (guild_id, user_id, moderator_id, reason, created_at)
