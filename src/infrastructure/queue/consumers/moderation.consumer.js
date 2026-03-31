@@ -1,8 +1,6 @@
 'use strict';
 
-const { setTimeout: sleep } = require('timers/promises');
 const { QUEUE_NAMES } = require('../../../config/constants/queue.names');
-const { computeBackoffMs } = require('../../../core/utils/backoff');
 const { withTimeout } = require('../../../core/utils/timeout');
 
 const MODERATION_DEAD_LETTER_QUEUE = `${QUEUE_NAMES.moderation}:dead-letter`;
@@ -154,7 +152,16 @@ class ModerationConsumer {
         moderationActionId: job.moderationActionId,
         effectType
       });
-      await this.handleFailure(job, reservationToken, error);
+      this.logger?.warn?.('Queue job failed, waiting for visibility timeout retry', {
+        correlationId: job.correlationId || job.traceId || null,
+        causationId: job.causationId || null,
+        userId: job.userId || null,
+        guildId: job.guildId || null,
+        queueName: QUEUE_NAMES.moderation,
+        action: job.action || null,
+        error: error.message,
+        visibilityTimeoutMs: this.visibilityTimeoutMs
+      });
     }
   }
 
@@ -182,48 +189,6 @@ class ModerationConsumer {
       guildId: job.guildId,
       userId: job.userId,
       traceId: job.traceId || null
-    });
-  }
-
-  async handleFailure(job, reservationToken, error) {
-    const attempt = Number.isInteger(job.attempt) ? job.attempt + 1 : 1;
-    const maxAttempts = Number.isInteger(job.maxAttempts) ? job.maxAttempts : 3;
-    const failureMeta = {
-      correlationId: job.correlationId || job.traceId || null,
-      causationId: job.causationId || null,
-      userId: job.userId || null,
-      guildId: job.guildId || null,
-      queueName: QUEUE_NAMES.moderation,
-      action: job.action || null,
-      attempt,
-      maxAttempts,
-      error: error.message
-    };
-
-    if (attempt >= maxAttempts) {
-      this.logger?.error?.('Queue job failed permanently', failureMeta);
-      await this.queueClient.enqueue(MODERATION_DEAD_LETTER_QUEUE, {
-        ...job,
-        attempt,
-        failedAt: Date.now(),
-        error: error.message
-      });
-      await this.queueClient.ack(QUEUE_NAMES.moderation, reservationToken);
-      return;
-    }
-
-    const backoffMs = computeBackoffMs(attempt, this.envConfig?.redis?.retryBaseMs ?? 100);
-    this.logger?.warn?.('Queue job failed, retry scheduled', {
-      ...failureMeta,
-      backoffMs
-    });
-    await sleep(backoffMs);
-
-    await this.queueClient.requeue(QUEUE_NAMES.moderation, reservationToken, {
-      ...job,
-      attempt,
-      runAt: Date.now() + backoffMs,
-      lastError: error.message
     });
   }
 }

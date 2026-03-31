@@ -10,6 +10,18 @@ class QueueClient {
     this.requeueBatchSize = 25;
   }
 
+  processingQueueKey(queueName) {
+    return `${queueName}:processing`;
+  }
+
+  processingItemsKey(queueName) {
+    return `${queueName}:processing:items`;
+  }
+
+  visibilityKey(queueName) {
+    return `${queueName}:processing:visibility`;
+  }
+
   async enqueue(queueName, job) {
     return this.circuitBreaker.execute(
       async () => this.redisClient.rPush(queueName, JSON.stringify(job)),
@@ -24,18 +36,6 @@ class QueueClient {
     );
   }
 
-  processingQueueKey(queueName) {
-    return `${queueName}:processing`;
-  }
-
-  processingItemsKey(queueName) {
-    return `${queueName}:processing:items`;
-  }
-
-  visibilityKey(queueName) {
-    return `${queueName}:processing:visibility`;
-  }
-
   async reserve(queueName, options = {}) {
     const blockTimeoutSeconds = Number.isInteger(options.blockTimeoutSeconds) ? options.blockTimeoutSeconds : 1;
     const visibilityTimeoutMs = Number.isInteger(options.visibilityTimeoutMs)
@@ -44,16 +44,15 @@ class QueueClient {
 
     return this.circuitBreaker.execute(
       async () => {
-        await this.requeue(queueName);
+        await this.requeueExpired(queueName, this.requeueBatchSize);
 
         const rawJob = await this.redisClient.blMove(
           queueName,
           this.processingQueueKey(queueName),
-          'LEFT',
           'RIGHT',
+          'LEFT',
           blockTimeoutSeconds
         );
-
         if (!rawJob) {
           return null;
         }
@@ -61,13 +60,39 @@ class QueueClient {
         const reservationToken = randomUUID();
         const visibilityDeadline = Date.now() + Math.max(1_000, visibilityTimeoutMs);
 
-        await this.redisClient.multi()
-          .hSet(this.processingItemsKey(queueName), reservationToken, rawJob)
-          .zAdd(this.visibilityKey(queueName), {
-            score: visibilityDeadline,
-            value: reservationToken
-          })
-          .exec();
+        const reserved = await this.redisClient.eval(
+          [
+            'local processingQueue = KEYS[1]',
+            'local processingItems = KEYS[2]',
+            'local visibility = KEYS[3]',
+            'local expectedRawJob = ARGV[1]',
+            'local reservationToken = ARGV[2]',
+            'local visibilityDeadline = tonumber(ARGV[3])',
+            'local rawJob = redis.call("LPOP", processingQueue)',
+            'if not rawJob or rawJob ~= expectedRawJob then',
+            '  if rawJob then',
+            '    redis.call("LPUSH", processingQueue, rawJob)',
+            '  end',
+            '  return 0',
+            'end',
+            'redis.call("RPUSH", processingQueue, expectedRawJob)',
+            'redis.call("HSET", processingItems, reservationToken, expectedRawJob)',
+            'redis.call("ZADD", visibility, visibilityDeadline, reservationToken)',
+            'return 1'
+          ].join('\n'),
+          {
+            keys: [
+              this.processingQueueKey(queueName),
+              this.processingItemsKey(queueName),
+              this.visibilityKey(queueName)
+            ],
+            arguments: [rawJob, reservationToken, String(visibilityDeadline)]
+          }
+        );
+
+        if (Number(reserved) !== 1) {
+          return null;
+        }
 
         return {
           reservationToken,
@@ -85,79 +110,77 @@ class QueueClient {
 
     return this.circuitBreaker.execute(
       async () => {
-        const rawJob = await this.redisClient.hGet(this.processingItemsKey(queueName), reservationToken);
+        const removed = await this.redisClient.eval(
+          [
+            'local processingQueue = KEYS[1]',
+            'local processingItems = KEYS[2]',
+            'local visibility = KEYS[3]',
+            'local reservationToken = ARGV[1]',
+            'local rawJob = redis.call("HGET", processingItems, reservationToken)',
+            'if rawJob then',
+            '  redis.call("LREM", processingQueue, 1, rawJob)',
+            'end',
+            'local existed = redis.call("HEXISTS", processingItems, reservationToken)',
+            'redis.call("HDEL", processingItems, reservationToken)',
+            'redis.call("ZREM", visibility, reservationToken)',
+            'return existed'
+          ].join('\n'),
+          {
+            keys: [
+              this.processingQueueKey(queueName),
+              this.processingItemsKey(queueName),
+              this.visibilityKey(queueName)
+            ],
+            arguments: [reservationToken]
+          }
+        );
 
-        if (!rawJob) {
-          return false;
-        }
-
-        const [, , removedFromProcessing] = await this.redisClient.multi()
-          .zRem(this.visibilityKey(queueName), reservationToken)
-          .hDel(this.processingItemsKey(queueName), reservationToken)
-          .lRem(this.processingQueueKey(queueName), 1, rawJob)
-          .exec();
-
-        return Number(removedFromProcessing) > 0;
+        return Number(removed) === 1;
       },
       { label: `redis.queue.ack:${queueName}` }
     );
   }
 
-  async requeue(queueName, reservationToken = null, job = null) {
+  async requeueExpired(queueName, limit = this.requeueBatchSize) {
     return this.circuitBreaker.execute(
       async () => {
-        if (reservationToken) {
-          const rawJob = await this.redisClient.hGet(this.processingItemsKey(queueName), reservationToken);
-          if (!rawJob) {
-            return 0;
+        const safeLimit = Math.max(1, Number(limit) || this.requeueBatchSize);
+        const moved = await this.redisClient.eval(
+          [
+            'local pending = KEYS[1]',
+            'local processingQueue = KEYS[2]',
+            'local processingItems = KEYS[3]',
+            'local visibility = KEYS[4]',
+            'local now = tonumber(ARGV[1])',
+            'local limit = tonumber(ARGV[2])',
+            'local tokens = redis.call("ZRANGEBYSCORE", visibility, "-inf", now, "LIMIT", 0, limit)',
+            'local moved = 0',
+            'for _, token in ipairs(tokens) do',
+            '  local rawJob = redis.call("HGET", processingItems, token)',
+            '  if rawJob then',
+            '    redis.call("LREM", processingQueue, 1, rawJob)',
+            '    redis.call("RPUSH", pending, rawJob)',
+            '    moved = moved + 1',
+            '  end',
+            '  redis.call("HDEL", processingItems, token)',
+            '  redis.call("ZREM", visibility, token)',
+            'end',
+            'return moved'
+          ].join('\n'),
+          {
+            keys: [
+              queueName,
+              this.processingQueueKey(queueName),
+              this.processingItemsKey(queueName),
+              this.visibilityKey(queueName)
+            ],
+            arguments: [String(Date.now()), String(safeLimit)]
           }
-
-          const payload = job ? JSON.stringify(job) : rawJob;
-
-          await this.redisClient.multi()
-            .zRem(this.visibilityKey(queueName), reservationToken)
-            .hDel(this.processingItemsKey(queueName), reservationToken)
-            .lRem(this.processingQueueKey(queueName), 1, rawJob)
-            .rPush(queueName, payload)
-            .exec();
-          return 1;
-        }
-
-        const now = Date.now();
-        const expiredTokens = await this.redisClient.zRangeByScore(
-          this.visibilityKey(queueName),
-          0,
-          now,
-          { LIMIT: { offset: 0, count: this.requeueBatchSize } }
         );
 
-        if (!expiredTokens.length) {
-          return 0;
-        }
-
-        let moved = 0;
-        for (const token of expiredTokens) {
-          const rawJob = await this.redisClient.hGet(this.processingItemsKey(queueName), token);
-          if (!rawJob) {
-            await this.redisClient.zRem(this.visibilityKey(queueName), token);
-            continue;
-          }
-
-          const [, , removed] = await this.redisClient.multi()
-            .zRem(this.visibilityKey(queueName), token)
-            .hDel(this.processingItemsKey(queueName), token)
-            .lRem(this.processingQueueKey(queueName), 1, rawJob)
-            .rPush(queueName, rawJob)
-            .exec();
-
-          if (Number(removed) > 0) {
-            moved += 1;
-          }
-        }
-
-        return moved;
+        return Number(moved);
       },
-      { label: `redis.queue.requeue:${queueName}` }
+      { label: `redis.queue.requeueExpired:${queueName}` }
     );
   }
 }
