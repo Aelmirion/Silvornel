@@ -3,13 +3,21 @@
 const { randomUUID } = require('crypto');
 
 class QueueClient {
-  constructor({ redisClient, circuitBreaker }) {
+  constructor({ redisClient, circuitBreaker, envConfig, logger }) {
     this.redisClient = redisClient;
     this.circuitBreaker = circuitBreaker;
     this.defaultVisibilityTimeoutMs = 30_000;
     this.requeueBatchSize = 25;
     this.delayedBatchSize = 25;
     this.delayedQueueKeyName = 'delayed_jobs';
+    this.envConfig = envConfig;
+    this.logger = logger;
+
+    // Queue safety note: Redis persistence is required for crash durability.
+    // If AOF is not enabled on Redis, this queue is at-most-memory and jobs can be lost on Redis restart.
+    if (this.envConfig?.redis?.durabilityMode !== 'aof_required') {
+      this.logger?.warn?.('Redis queue durability guard: REDIS_DURABILITY_MODE is not set to aof_required. Queue correctness depends on Redis AOF for crash durability.');
+    }
   }
 
   processingQueueKey(queueName) {
@@ -28,9 +36,37 @@ class QueueClient {
     return this.delayedQueueKeyName;
   }
 
-  async enqueue(queueName, job) {
+  async enqueue(queueName, job, options = {}) {
     return this.circuitBreaker.execute(
-      async () => this.redisClient.rPush(queueName, JSON.stringify(job)),
+      async () => {
+        const rawJob = JSON.stringify(job);
+        const maxLength = Number.isInteger(options.maxLength) ? options.maxLength : null;
+
+        if (maxLength === null) {
+          await this.redisClient.rPush(queueName, rawJob);
+          return true;
+        }
+
+        const accepted = await this.redisClient.eval(
+          [
+            'local pending = KEYS[1]',
+            'local rawJob = ARGV[1]',
+            'local maxLength = tonumber(ARGV[2])',
+            'local currentLength = redis.call("LLEN", pending)',
+            'if currentLength >= maxLength then',
+            '  return 0',
+            'end',
+            'redis.call("RPUSH", pending, rawJob)',
+            'return 1'
+          ].join('\n'),
+          {
+            keys: [queueName],
+            arguments: [rawJob, String(maxLength)]
+          }
+        );
+
+        return Number(accepted) === 1;
+      },
       { label: `redis.queue.enqueue:${queueName}` }
     );
   }
@@ -71,58 +107,56 @@ class QueueClient {
         await this.promoteDueDelayedJobs(this.delayedBatchSize);
         await this.requeueExpired(queueName, this.requeueBatchSize);
 
-        const rawJob = await this.redisClient.blMove(
-          queueName,
-          this.processingQueueKey(queueName),
-          'RIGHT',
-          'LEFT',
-          blockTimeoutSeconds
-        );
-        if (!rawJob) {
-          return null;
-        }
+        const waitDeadlineMs = Date.now() + (Math.max(0, blockTimeoutSeconds) * 1000);
+        const pollSleepMs = 50;
 
-        const reservationToken = randomUUID();
-        const visibilityDeadline = Date.now() + Math.max(1_000, visibilityTimeoutMs);
+        while (true) {
+          const reservationToken = randomUUID();
+          const visibilityDeadline = Date.now() + Math.max(1_000, visibilityTimeoutMs);
 
-        const reserved = await this.redisClient.eval(
-          [
-            'local processingQueue = KEYS[1]',
-            'local processingItems = KEYS[2]',
-            'local visibility = KEYS[3]',
-            'local expectedRawJob = ARGV[1]',
-            'local reservationToken = ARGV[2]',
-            'local visibilityDeadline = tonumber(ARGV[3])',
-            'local rawJob = redis.call("LPOP", processingQueue)',
-            'if not rawJob or rawJob ~= expectedRawJob then',
-            '  if rawJob then',
-            '    redis.call("LPUSH", processingQueue, rawJob)',
-            '  end',
-            '  return 0',
-            'end',
-            'redis.call("RPUSH", processingQueue, expectedRawJob)',
-            'redis.call("HSET", processingItems, reservationToken, expectedRawJob)',
-            'redis.call("ZADD", visibility, visibilityDeadline, reservationToken)',
-            'return 1'
-          ].join('\n'),
-          {
-            keys: [
-              this.processingQueueKey(queueName),
-              this.processingItemsKey(queueName),
-              this.visibilityKey(queueName)
-            ],
-            arguments: [rawJob, reservationToken, String(visibilityDeadline)]
+          const rawJob = await this.redisClient.eval(
+            [
+              'local pending = KEYS[1]',
+              'local processingQueue = KEYS[2]',
+              'local processingItems = KEYS[3]',
+              'local visibility = KEYS[4]',
+              'local reservationToken = ARGV[1]',
+              'local visibilityDeadline = tonumber(ARGV[2])',
+              'local rawJob = redis.call("LPOP", pending)',
+              'if not rawJob then',
+              '  return false',
+              'end',
+              'redis.call("RPUSH", processingQueue, rawJob)',
+              'redis.call("HSET", processingItems, reservationToken, rawJob)',
+              'redis.call("ZADD", visibility, visibilityDeadline, reservationToken)',
+              'return rawJob'
+            ].join('\n'),
+            {
+              keys: [
+                queueName,
+                this.processingQueueKey(queueName),
+                this.processingItemsKey(queueName),
+                this.visibilityKey(queueName)
+              ],
+              arguments: [reservationToken, String(visibilityDeadline)]
+            }
+          );
+
+          if (rawJob) {
+            return {
+              reservationToken,
+              rawJob
+            };
           }
-        );
 
-        if (Number(reserved) !== 1) {
-          return null;
+          if (Date.now() >= waitDeadlineMs) {
+            return null;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, pollSleepMs));
+          await this.promoteDueDelayedJobs(this.delayedBatchSize);
+          await this.requeueExpired(queueName, this.requeueBatchSize);
         }
-
-        return {
-          reservationToken,
-          rawJob
-        };
       },
       { label: `redis.queue.reserve:${queueName}` }
     );

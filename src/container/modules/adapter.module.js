@@ -47,7 +47,12 @@ function registerAdapterModule(container) {
   container.bind(TOKENS.CacheClient, (c) => new CacheClient({ redisClient: c.resolve(TOKENS.RedisCacheBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
   container.bind(TOKENS.PubClient, (c) => new PubClient({ redisClient: c.resolve(TOKENS.RedisPubBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
   container.bind(TOKENS.SubClient, (c) => new SubClient({ redisClient: c.resolve(TOKENS.RedisSubBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
-  container.bind(TOKENS.QueueClient, (c) => new QueueClient({ redisClient: c.resolve(TOKENS.RedisQueueBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
+  container.bind(TOKENS.QueueClient, (c) => new QueueClient({
+    redisClient: c.resolve(TOKENS.RedisQueueBaseClient),
+    circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis),
+    envConfig: c.resolve(TOKENS.EnvConfig),
+    logger: c.resolve(TOKENS.Logger)
+  }));
   container.bind(TOKENS.RateLimitClient, (c) => new RateLimitClient({ redisClient: c.resolve(TOKENS.RedisRateLimitBaseClient), circuitBreaker: c.resolve(TOKENS.CircuitBreakerRedis) }));
 }
 

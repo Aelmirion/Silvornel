@@ -8,8 +8,12 @@ class QueueService {
   }
 
   async enqueue(queueName, job) {
-    const queueLength = await this.queueClient.length(queueName);
-    if (queueLength >= this.envConfig.queue.maxLength) {
+    const enqueued = await this.queueClient.enqueue(queueName, job, {
+      maxLength: this.envConfig.queue.maxLength
+    });
+
+    if (!enqueued) {
+      const queueLength = await this.queueClient.length(queueName);
       this.logger?.warn?.('Queue backpressure threshold reached', {
         correlationId: job?.correlationId || job?.traceId || null,
         causationId: job?.causationId || null,
@@ -29,7 +33,7 @@ class QueueService {
       guildId: job?.guildId || null,
       queueName
     });
-    await this.queueClient.enqueue(queueName, job);
+
   }
 }
 
