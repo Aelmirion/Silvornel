@@ -14,7 +14,8 @@ class ModerationController {
       userId: interactionDto.userId,
       guildId: interactionDto.guildId,
       options: interactionDto.options,
-      correlationId: interactionDto.id || null
+      correlationId: interactionDto.correlationId || interactionDto.id || null,
+      causationId: interactionDto.causationId || interactionDto.id || null
     });
 
     const moderationDto = ModerationDto.fromCommand(commandDto);

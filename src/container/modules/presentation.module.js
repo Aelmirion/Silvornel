@@ -12,6 +12,7 @@ const { createRateLimitMiddleware } = require('../../presentation/middleware/rat
 const { cooldownMiddleware } = require('../../presentation/middleware/cooldown.middleware');
 const { validationMiddleware } = require('../../presentation/middleware/validation.middleware');
 const { createErrorMiddleware } = require('../../presentation/middleware/error.middleware');
+const { tracingMiddleware } = require('../../presentation/middleware/tracing.middleware');
 
 function registerPresentationModule(container) {
   container.bind(TOKENS.PingController, (c) => new PingController({ pingService: c.resolve(TOKENS.PingService) }));
@@ -27,6 +28,7 @@ function registerPresentationModule(container) {
   container.bind(TOKENS.MiddlewarePipeline, (c) => new MiddlewarePipeline({
     middlewares: [
       createErrorMiddleware({ errorMapper: c.resolve(TOKENS.ErrorMapper) }),
+      tracingMiddleware,
       authMiddleware,
       guildOnlyMiddleware,
       createRateLimitMiddleware({ rateLimitService: c.resolve(TOKENS.RateLimitService) }),

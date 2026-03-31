@@ -1,14 +1,17 @@
 'use strict';
 
 const { DomainError } = require('../../core/errors/DomainError');
+const { sanitizeInput } = require('../../core/security/sanitizer');
 
 class ProfileDto {
-  constructor({ userId, guildId, action, bio = null, preferences = null }) {
+  constructor({ userId, guildId, action, bio = null, preferences = null, correlationId = null, causationId = null }) {
     this.userId = userId;
     this.guildId = guildId;
     this.action = action;
     this.bio = bio;
     this.preferences = preferences;
+    this.correlationId = correlationId;
+    this.causationId = causationId;
   }
 
   static fromCommand(commandDto) {
@@ -25,9 +28,10 @@ class ProfileDto {
     const preferencesOption = nestedOptions.find((option) => option.name === 'preferences');
 
     let preferences = null;
-    if (typeof preferencesOption?.value === 'string' && preferencesOption.value.trim().length > 0) {
+    const rawPreferences = sanitizeInput(preferencesOption?.value);
+    if (typeof rawPreferences === 'string' && rawPreferences.length > 0) {
       try {
-        preferences = JSON.parse(preferencesOption.value);
+        preferences = JSON.parse(rawPreferences);
       } catch (_error) {
         throw new DomainError('Invalid preferences JSON', 'PROFILE_INVALID_PREFERENCES_JSON');
       }
@@ -37,8 +41,10 @@ class ProfileDto {
       userId: commandDto.userId,
       guildId: commandDto.guildId,
       action,
-      bio: typeof bioOption?.value === 'string' ? bioOption.value : null,
-      preferences
+      bio: typeof bioOption?.value === 'string' ? sanitizeInput(bioOption.value) : null,
+      preferences,
+      correlationId: commandDto.correlationId || null,
+      causationId: commandDto.causationId || commandDto.correlationId || null
     });
   }
 }

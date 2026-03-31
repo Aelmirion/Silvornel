@@ -11,6 +11,7 @@ class WarningRepository extends WarningRepositoryContract {
     super();
     this.pool = pool;
     this.moderationSql = moderationSql;
+    this.schemaReady = false;
   }
 
   mapRowToModel(row) {
@@ -37,6 +38,24 @@ class WarningRepository extends WarningRepositoryContract {
     }
   }
 
+  async ensureReliabilitySchema(connection) {
+    if (this.schemaReady) {
+      return;
+    }
+
+    await withTimeout(
+      () => connection.query(this.moderationSql.ensureModerationActionsTable),
+      EXTERNAL_TIMEOUT_MS,
+      'db.query.ensureModerationActionsTable'
+    );
+    await withTimeout(
+      () => connection.query(this.moderationSql.ensureEventOutboxTable),
+      EXTERNAL_TIMEOUT_MS,
+      'db.query.ensureEventOutboxTable'
+    );
+    this.schemaReady = true;
+  }
+
   async createWarning(warning, tx = null) {
     const { warning: createdWarning } = await this.createWarningWithCount(warning, tx);
     return createdWarning;
@@ -46,6 +65,7 @@ class WarningRepository extends WarningRepositoryContract {
     const warningModel = warning instanceof Warning ? warning : new Warning(warning);
 
     return this.withConnection(tx, async (connection) => {
+      await this.ensureReliabilitySchema(connection);
       const createdAt = warningModel.createdAt || new Date().toISOString();
 
       const result = await withTimeout(
@@ -83,6 +103,72 @@ class WarningRepository extends WarningRepositoryContract {
         warningCount
       };
     }, 'createWarningWithCount');
+  }
+
+  async registerModerationAction({ moderationActionId, guildId, userId, actionType, correlationId = null, causationId = null }, tx = null) {
+    return this.withConnection(tx, async (connection) => {
+      await this.ensureReliabilitySchema(connection);
+      try {
+        await withTimeout(
+          () => connection.query(
+            this.moderationSql.insertModerationAction,
+            [moderationActionId, guildId, userId, actionType, correlationId, causationId, new Date().toISOString()]
+          ),
+          EXTERNAL_TIMEOUT_MS,
+          'db.query.insertModerationAction'
+        );
+        return true;
+      } catch (error) {
+        if (error && (error.code === 'ER_DUP_ENTRY' || String(error.message || '').includes('Duplicate'))) {
+          return false;
+        }
+        throw error;
+      }
+    }, 'registerModerationAction');
+  }
+
+  async createOutboxEvent({ eventId, destination, eventType, payload, correlationId = null, causationId = null }, tx = null) {
+    return this.withConnection(tx, async (connection) => {
+      await this.ensureReliabilitySchema(connection);
+      await withTimeout(
+        () => connection.query(
+          this.moderationSql.insertOutboxEvent,
+          [eventId, destination, eventType, JSON.stringify(payload), correlationId, causationId, new Date().toISOString()]
+        ),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.insertOutboxEvent'
+      );
+    }, 'createOutboxEvent');
+  }
+
+  async markOutboxPublished(eventId, tx = null) {
+    return this.withConnection(tx, async (connection) => {
+      await withTimeout(
+        () => connection.query(this.moderationSql.markOutboxPublished, [new Date().toISOString(), eventId]),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.markOutboxPublished'
+      );
+    }, 'markOutboxPublished');
+  }
+
+  async getPendingOutboxEvents(limit = 20, tx = null) {
+    return this.withConnection(tx, async (connection) => {
+      await this.ensureReliabilitySchema(connection);
+      const rows = await withTimeout(
+        () => connection.query(this.moderationSql.getPendingOutboxEvents, [limit]),
+        EXTERNAL_TIMEOUT_MS,
+        'db.query.getPendingOutboxEvents'
+      );
+      return rows.map((row) => ({
+        eventId: row.event_id,
+        destination: row.destination,
+        eventType: row.event_type,
+        payload: JSON.parse(row.payload),
+        correlationId: row.correlation_id,
+        causationId: row.causation_id,
+        createdAt: row.created_at
+      }));
+    }, 'getPendingOutboxEvents');
   }
 
   async getWarningsByUser(guildId, userId, tx = null) {
