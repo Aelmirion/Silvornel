@@ -8,12 +8,22 @@ const { EVENT_SCHEMA } = require('../../../config/constants/event.schema');
 const { QUEUE_NAMES } = require('../../../config/constants/queue.names');
 
 class ModerationService {
-  constructor({ warningRepository, warningCacheRepository, pubSubService, queueService }) {
+  constructor({ warningRepository, warningCacheRepository, pubSubService, queueService, logger }) {
     this.warningRepository = warningRepository;
     this.warningCacheRepository = warningCacheRepository;
     this.pubSubService = pubSubService;
     this.queueService = queueService;
+    this.logger = logger;
     this.warningsTtlSeconds = 180;
+  }
+
+  buildLogContext(dto, extra = {}) {
+    return {
+      correlationId: dto?.correlationId || null,
+      userId: dto?.targetUserId || dto?.moderatorId || null,
+      guildId: dto?.guildId || null,
+      ...extra
+    };
   }
 
   async publishWarningsInvalidation(dto) {
@@ -31,44 +41,61 @@ class ModerationService {
     });
   }
 
-  async runStep(stepName, executor) {
+  async runStep(stepName, dto, executor) {
     try {
       return await executor();
     } catch (error) {
+      this.logger?.error?.('Moderation flow step failed', this.buildLogContext(dto, {
+        stepName,
+        error: error.message
+      }));
       throw new Error(`Moderation flow failed at "${stepName}": ${error.message}`, { cause: error });
     }
   }
 
   async warnUser(dto) {
-    const warning = await this.runStep('db_write_warning', async () => this.warningRepository.createWarning(new Warning({
+    this.logger?.info?.('Moderation action started', this.buildLogContext(dto, {
+      action: 'warn',
+      moderatorId: dto.moderatorId
+    }));
+
+    const warning = await this.runStep('db_write_warning', dto, async () => this.warningRepository.createWarning(new Warning({
       guildId: dto.guildId,
       userId: dto.targetUserId,
       moderatorId: dto.moderatorId,
       reason: dto.reason
     })));
 
-    await this.runStep('cache_invalidation', async () => {
+    await this.runStep('cache_invalidation', dto, async () => {
       if (this.warningCacheRepository) {
         await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
       }
     });
 
-    await this.runStep('pubsub_publish', async () => this.publishWarningsInvalidation(dto));
+    await this.runStep('pubsub_publish', dto, async () => this.publishWarningsInvalidation(dto));
 
-    const warnings = await this.runStep('db_read_warnings', async () => this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId));
+    const warnings = await this.runStep('db_read_warnings', dto, async () => this.warningRepository.getWarningsByUser(dto.guildId, dto.targetUserId));
     const warningCount = warnings.length;
     const moderationRule = evaluateModerationActionByWarnings(warningCount);
 
     if (moderationRule && this.queueService) {
-      await this.runStep('queue_enqueue', async () => this.queueService.enqueue(QUEUE_NAMES.moderation, {
+      await this.runStep('queue_enqueue', dto, async () => this.queueService.enqueue(QUEUE_NAMES.moderation, {
         type: 'moderation_action',
         userId: dto.targetUserId,
         guildId: dto.guildId,
         action: moderationRule.action,
         reason: moderationRule.reason,
-        traceId: dto.traceId || randomUUID()
+        correlationId: dto.correlationId || null,
+        traceId: dto.traceId || dto.correlationId || randomUUID()
       }));
     }
+
+    this.logger?.info?.('Moderation action completed', this.buildLogContext(dto, {
+      action: 'warn',
+      warningId: warning.id,
+      warningCount,
+      moderationAction: moderationRule?.action || null
+    }));
 
     return {
       kind: 'interaction.response',
@@ -88,9 +115,19 @@ class ModerationService {
   }
 
   async getWarnings(dto) {
+    this.logger?.info?.('Moderation action started', this.buildLogContext(dto, {
+      action: 'warnings',
+      moderatorId: dto.moderatorId
+    }));
+
     if (this.warningCacheRepository) {
       const cachedWarnings = await this.warningCacheRepository.getWarnings(dto.guildId, dto.targetUserId);
       if (Array.isArray(cachedWarnings)) {
+        this.logger?.info?.('Moderation action completed', this.buildLogContext(dto, {
+          action: 'warnings',
+          source: 'cache',
+          warningCount: cachedWarnings.length
+        }));
         return this.buildWarningsResponse(dto, cachedWarnings, 'cache');
       }
     }
@@ -100,6 +137,12 @@ class ModerationService {
     if (this.warningCacheRepository) {
       await this.warningCacheRepository.setWarnings(dto.guildId, dto.targetUserId, warnings, this.warningsTtlSeconds);
     }
+
+    this.logger?.info?.('Moderation action completed', this.buildLogContext(dto, {
+      action: 'warnings',
+      source: 'db',
+      warningCount: warnings.length
+    }));
 
     return this.buildWarningsResponse(dto, warnings, 'db');
   }
@@ -127,15 +170,25 @@ class ModerationService {
   }
 
   async clearWarnings(dto) {
-    const deletedCount = await this.runStep('db_delete_warnings', async () => this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId));
+    this.logger?.info?.('Moderation action started', this.buildLogContext(dto, {
+      action: 'clearwarnings',
+      moderatorId: dto.moderatorId
+    }));
 
-    await this.runStep('cache_invalidation', async () => {
+    const deletedCount = await this.runStep('db_delete_warnings', dto, async () => this.warningRepository.deleteWarningsByUser(dto.guildId, dto.targetUserId));
+
+    await this.runStep('cache_invalidation', dto, async () => {
       if (this.warningCacheRepository) {
         await this.warningCacheRepository.deleteWarnings(dto.guildId, dto.targetUserId);
       }
     });
 
-    await this.runStep('pubsub_publish', async () => this.publishWarningsInvalidation(dto));
+    await this.runStep('pubsub_publish', dto, async () => this.publishWarningsInvalidation(dto));
+
+    this.logger?.info?.('Moderation action completed', this.buildLogContext(dto, {
+      action: 'clearwarnings',
+      deletedCount
+    }));
 
     return {
       kind: 'interaction.response',
