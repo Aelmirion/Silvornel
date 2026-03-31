@@ -8,6 +8,8 @@ class QueueClient {
     this.circuitBreaker = circuitBreaker;
     this.defaultVisibilityTimeoutMs = 30_000;
     this.requeueBatchSize = 25;
+    this.delayedBatchSize = 25;
+    this.delayedQueueKeyName = 'delayed_jobs';
   }
 
   processingQueueKey(queueName) {
@@ -22,10 +24,32 @@ class QueueClient {
     return `${queueName}:processing:visibility`;
   }
 
+  delayedQueueKey() {
+    return this.delayedQueueKeyName;
+  }
+
   async enqueue(queueName, job) {
     return this.circuitBreaker.execute(
       async () => this.redisClient.rPush(queueName, JSON.stringify(job)),
       { label: `redis.queue.enqueue:${queueName}` }
+    );
+  }
+
+  async enqueueAt(queueName, job, executeAtMs) {
+    return this.circuitBreaker.execute(
+      async () => {
+        const delayedJob = {
+          delayedJobId: randomUUID(),
+          queueName,
+          rawJob: JSON.stringify(job)
+        };
+
+        await this.redisClient.zAdd(this.delayedQueueKey(), {
+          score: Math.max(0, Number(executeAtMs) || 0),
+          value: JSON.stringify(delayedJob)
+        });
+      },
+      { label: `redis.queue.enqueueAt:${queueName}` }
     );
   }
 
@@ -44,6 +68,7 @@ class QueueClient {
 
     return this.circuitBreaker.execute(
       async () => {
+        await this.promoteDueDelayedJobs(this.delayedBatchSize);
         await this.requeueExpired(queueName, this.requeueBatchSize);
 
         const rawJob = await this.redisClient.blMove(
@@ -100,6 +125,100 @@ class QueueClient {
         };
       },
       { label: `redis.queue.reserve:${queueName}` }
+    );
+  }
+
+  async scheduleRetry(queueName, reservationToken, job, executeAtMs) {
+    if (!reservationToken) {
+      return false;
+    }
+
+    return this.circuitBreaker.execute(
+      async () => {
+        const scheduled = await this.redisClient.eval(
+          [
+            'local processingQueue = KEYS[1]',
+            'local processingItems = KEYS[2]',
+            'local visibility = KEYS[3]',
+            'local delayedJobs = KEYS[4]',
+            'local queueName = ARGV[1]',
+            'local reservationToken = ARGV[2]',
+            'local executeAtMs = tonumber(ARGV[3])',
+            'local delayedJobId = ARGV[4]',
+            'local rawRetryJob = ARGV[5]',
+            'local rawJob = redis.call("HGET", processingItems, reservationToken)',
+            'if not rawJob then',
+            '  return 0',
+            'end',
+            'redis.call("LREM", processingQueue, 1, rawJob)',
+            'redis.call("HDEL", processingItems, reservationToken)',
+            'redis.call("ZREM", visibility, reservationToken)',
+            'local nowTime = redis.call("TIME")',
+            'local nowMs = (tonumber(nowTime[1]) * 1000) + math.floor(tonumber(nowTime[2]) / 1000)',
+            'local score = executeAtMs',
+            'if not score or score < nowMs then',
+            '  score = nowMs',
+            'end',
+            'local delayedValue = cjson.encode({ delayedJobId = delayedJobId, queueName = queueName, rawJob = rawRetryJob })',
+            'redis.call("ZADD", delayedJobs, score, delayedValue)',
+            'return 1'
+          ].join('\n'),
+          {
+            keys: [
+              this.processingQueueKey(queueName),
+              this.processingItemsKey(queueName),
+              this.visibilityKey(queueName),
+              this.delayedQueueKey()
+            ],
+            arguments: [
+              queueName,
+              reservationToken,
+              String(Math.max(0, Number(executeAtMs) || 0)),
+              randomUUID(),
+              JSON.stringify(job)
+            ]
+          }
+        );
+
+        return Number(scheduled) === 1;
+      },
+      { label: `redis.queue.scheduleRetry:${queueName}` }
+    );
+  }
+
+  async promoteDueDelayedJobs(limit = this.delayedBatchSize) {
+    return this.circuitBreaker.execute(
+      async () => {
+        const safeLimit = Math.max(1, Number(limit) || this.delayedBatchSize);
+        const promoted = await this.redisClient.eval(
+          [
+            'local delayedJobs = KEYS[1]',
+            'local limit = tonumber(ARGV[1])',
+            'local nowTime = redis.call("TIME")',
+            'local nowMs = (tonumber(nowTime[1]) * 1000) + math.floor(tonumber(nowTime[2]) / 1000)',
+            'local dueJobs = redis.call("ZRANGEBYSCORE", delayedJobs, "-inf", nowMs, "LIMIT", 0, limit)',
+            'local moved = 0',
+            'for _, dueJob in ipairs(dueJobs) do',
+            '  local removed = redis.call("ZREM", delayedJobs, dueJob)',
+            '  if removed == 1 then',
+            '    local decoded = cjson.decode(dueJob)',
+            '    if decoded and decoded.queueName and decoded.rawJob then',
+            '      redis.call("RPUSH", decoded.queueName, decoded.rawJob)',
+            '      moved = moved + 1',
+            '    end',
+            '  end',
+            'end',
+            'return moved'
+          ].join('\n'),
+          {
+            keys: [this.delayedQueueKey()],
+            arguments: [String(safeLimit)]
+          }
+        );
+
+        return Number(promoted);
+      },
+      { label: 'redis.queue.promoteDueDelayedJobs' }
     );
   }
 
