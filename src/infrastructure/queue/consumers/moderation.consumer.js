@@ -15,8 +15,11 @@ class ModerationConsumer {
     this.warningRepository = warningRepository;
     this.logger = logger;
     this.timeoutMs = envConfig?.runtime?.externalCallTimeoutMs ?? 2000;
-    this.pollTimeoutSeconds = 1;
-    this.visibilityTimeoutMs = Math.max(this.timeoutMs + 10_000, 30_000);
+    this.pollTimeoutSeconds = Math.max(1, envConfig?.queue?.pollTimeoutSeconds ?? 1);
+    this.visibilityTimeoutMs = Math.max(
+      100,
+      envConfig?.queue?.visibilityTimeoutMs ?? Math.max(this.timeoutMs + 10_000, 30_000)
+    );
     this.retryBaseMs = envConfig?.queue?.retryBaseMs ?? 1000;
     this.maxAttempts = Math.max(1, envConfig?.queue?.maxAttempts ?? 5);
     this.isRunning = false;

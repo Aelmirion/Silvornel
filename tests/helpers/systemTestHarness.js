@@ -25,10 +25,13 @@ const { CacheInvalidationSubscriber } = require('../../src/infrastructure/pubsub
 const { QUEUE_NAMES } = require('../../src/config/constants/queue.names');
 
 function createEnvConfigForTests() {
+  const testMode = (process.env.TEST_MODE || 'local').toLowerCase();
+  const isCiMode = testMode === 'ci';
+
   return {
     db: {
-      host: process.env.TEST_MARIADB_HOST || '127.0.0.1',
-      port: Number(process.env.TEST_MARIADB_PORT || 3306),
+      host: process.env.TEST_MARIADB_HOST || (isCiMode ? 'mariadb' : '127.0.0.1'),
+      port: Number(process.env.TEST_MARIADB_PORT || (isCiMode ? 3306 : 3306)),
       user: process.env.TEST_MARIADB_USER || 'root',
       password: process.env.TEST_MARIADB_PASSWORD || '',
       database: process.env.TEST_MARIADB_DATABASE || 'silvornel_test',
@@ -37,16 +40,21 @@ function createEnvConfigForTests() {
       acquireTimeout: Number(process.env.TEST_MARIADB_ACQUIRE_TIMEOUT_MS || 5000)
     },
     redis: {
-      url: process.env.TEST_REDIS_URL || 'redis://127.0.0.1:6379'
+      url: process.env.TEST_REDIS_URL || (isCiMode ? 'redis://redis:6379/15' : 'redis://127.0.0.1:6379/15'),
+      keyPrefix: process.env.TEST_REDIS_KEY_PREFIX || 'test:'
     },
     queue: {
-      retryBaseMs: Number(process.env.TEST_QUEUE_RETRY_BASE_MS || 50),
+      retryBaseMs: Number(process.env.TEST_QUEUE_RETRY_BASE_MS || 100),
       maxAttempts: Number(process.env.TEST_QUEUE_MAX_ATTEMPTS || 3),
-      maxLength: Number(process.env.TEST_QUEUE_MAX_LENGTH || 1000)
+      maxLength: Number(process.env.TEST_QUEUE_MAX_LENGTH || 1000),
+      visibilityTimeoutMs: Number(process.env.TEST_QUEUE_VISIBILITY_TIMEOUT_MS || 250),
+      schedulerIntervalMs: Number(process.env.TEST_QUEUE_SCHEDULER_INTERVAL_MS || 100),
+      pollTimeoutSeconds: Number(process.env.TEST_QUEUE_POLL_TIMEOUT_SECONDS || 1)
     },
     runtime: {
       externalCallTimeoutMs: Number(process.env.TEST_EXTERNAL_CALL_TIMEOUT_MS || 200)
-    }
+    },
+    testMode
   };
 }
 
@@ -101,7 +109,7 @@ async function createSystemContext(options = {}) {
 
   const logger = createLogger();
   const breaker = new CircuitBreaker('system-tests', { timeoutMs: 5000 });
-  const queueClient = new QueueClient({ redisClient: redisQueue, circuitBreaker: breaker });
+  const queueClient = new QueueClient({ redisClient: redisQueue, circuitBreaker: breaker, envConfig, logger });
   const queueService = new QueueService({ queueClient, envConfig, logger });
 
   const warningRepository = new WarningRepository({ pool, moderationSql });
@@ -149,20 +157,21 @@ async function createSystemContext(options = {}) {
 async function resetTestState(ctx) {
   const conn = await ctx.pool.getConnection();
   try {
-    await conn.query('DELETE FROM warnings');
-    await conn.query('DELETE FROM warning_counts');
-    await conn.query('DELETE FROM moderation_actions');
-    await conn.query('DELETE FROM event_outbox');
-    await conn.query('DELETE FROM moderation_effect_executions');
+    await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+    await conn.query('TRUNCATE TABLE warnings');
+    await conn.query('TRUNCATE TABLE warning_counts');
+    await conn.query('TRUNCATE TABLE moderation_actions');
+    await conn.query('TRUNCATE TABLE event_outbox');
+    await conn.query('TRUNCATE TABLE moderation_effect_executions');
+    await conn.query('SET FOREIGN_KEY_CHECKS = 1');
   } finally {
     conn.release();
   }
 
-  const keys = await ctx.redis.redisQueue.keys('v1:*');
+  const keys = await ctx.redis.redisQueue.keys(`${ctx.envConfig.redis.keyPrefix}*`);
   if (keys.length > 0) {
     await ctx.redis.redisQueue.del(keys);
   }
-  await ctx.redis.redisQueue.del('delayed_jobs');
 }
 
 function createModerationConsumer(ctx, moderationActionService) {
@@ -180,7 +189,8 @@ function createRetryConsumer(ctx, pubSubService = ctx.pubSubService) {
     queueClient: ctx.queueClient,
     warningRepository: ctx.warningRepository,
     pubSubService,
-    logger: ctx.logger
+    logger: ctx.logger,
+    envConfig: ctx.envConfig
   });
 }
 
